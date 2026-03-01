@@ -2347,10 +2347,6 @@ class ClaudeBar(rumps.App):
                     items.append(_colored_mi(lines[1], "#D97757"))
                     items.append(None)
 
-            if data.overages_enabled is not None:
-                status = "✅  On" if data.overages_enabled else "⛔  Off"
-                items.append(_mi(f"  Extra usage  {status}"))
-                items.append(None)
 
         # ── ◇  CHATGPT section (if detected) ──────────────────────────────
         chatgpt_pd = next(
