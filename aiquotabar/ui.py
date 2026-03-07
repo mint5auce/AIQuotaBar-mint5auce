@@ -1008,6 +1008,906 @@ def _show_text(title: str, text: str):
         log.exception("_show_text failed")
 
 
+# -- floating panel (replaces NSMenu) ------------------------------------------
+
+# Brand colors for each provider
+_BRAND_COLORS = {
+    "Claude": "#D97757",
+    "ChatGPT": "#74AA9C",
+    "Copilot": "#6E40C9",
+    "Cursor": "#00A0D1",
+}
+
+# ObjC subclasses are defined lazily on first use so AppKit import
+# doesn't crash in headless / test contexts.
+_panel_classes_ready = False
+_DismissablePanelClass = None
+_ClickHandlerClass = None
+
+
+def _ensure_panel_classes():
+    """Create the ObjC subclasses exactly once."""
+    global _panel_classes_ready, _DismissablePanelClass, _ClickHandlerClass
+    if _panel_classes_ready:
+        return
+    try:
+        from AppKit import NSPanel, NSObject
+        import objc
+
+        class _DismissablePanel(NSPanel):
+            """Borderless panel that dismisses on Esc and focus loss."""
+
+            def canBecomeKeyWindow(self):
+                return True
+
+            def resignKeyWindow(self):
+                objc.super(_DismissablePanel, self).resignKeyWindow()
+                try:
+                    cb = getattr(self, '_dismiss_callback', None)
+                    if callable(cb):
+                        cb()
+                except Exception:
+                    pass
+
+            def cancelOperation_(self, sender):
+                try:
+                    cb = getattr(self, '_dismiss_callback', None)
+                    if callable(cb):
+                        cb()
+                except Exception:
+                    pass
+
+        class _ClickHandler(NSObject):
+            """ObjC target for the NSStatusItem button click."""
+
+            def togglePanel_(self, sender):
+                try:
+                    # Detect right-click: show fallback menu instead
+                    from AppKit import NSApplication
+                    evt = NSApplication.sharedApplication().currentEvent()
+                    # NSEventTypeRightMouseDown=3, NSEventTypeRightMouseUp=4
+                    if evt and evt.type() in (3, 4):
+                        menu_fn = getattr(type(self), '_show_menu_fn', None)
+                        if callable(menu_fn):
+                            menu_fn()
+                        return
+                    cb = getattr(type(self), '_toggle_fn', None)
+                    if callable(cb):
+                        cb()
+                except Exception:
+                    log.debug("_ClickHandler.togglePanel_ error", exc_info=True)
+
+            def refreshClicked_(self, sender):
+                try:
+                    cb = getattr(type(self), '_refresh_fn', None)
+                    if callable(cb):
+                        cb()
+                except Exception:
+                    log.debug("_ClickHandler.refreshClicked_ error", exc_info=True)
+
+            def gearClicked_(self, sender):
+                try:
+                    get_menu = getattr(type(self), '_gear_menu_fn', None)
+                    menu = get_menu() if callable(get_menu) else None
+                    if menu:
+                        from AppKit import NSMenu, NSApplication
+                        NSMenu.popUpContextMenu_withEvent_forView_(
+                            menu,
+                            NSApplication.sharedApplication().currentEvent(),
+                            sender,
+                        )
+                    else:
+                        subprocess.Popen(["open", "https://claude.ai/settings/usage"])
+                except Exception:
+                    log.debug("_ClickHandler.gearClicked_ error", exc_info=True)
+
+            def shareClicked_(self, sender):
+                try:
+                    cb = getattr(type(self), '_share_fn', None)
+                    if callable(cb):
+                        cb(sender)
+                except Exception:
+                    pass
+
+            def copyImage_(self, sender):
+                try:
+                    cb = getattr(type(self), '_copy_image_fn', None)
+                    if callable(cb):
+                        cb()
+                except Exception:
+                    log.debug("_ClickHandler.copyImage_ error", exc_info=True)
+
+            def shareOnX_(self, sender):
+                try:
+                    cb = getattr(type(self), '_share_on_x_fn', None)
+                    if callable(cb):
+                        cb()
+                except Exception:
+                    log.debug("_ClickHandler.shareOnX_ error", exc_info=True)
+
+        _DismissablePanelClass = _DismissablePanel
+        _ClickHandlerClass = _ClickHandler
+        _panel_classes_ready = True
+    except Exception:
+        log.debug("_ensure_panel_classes failed", exc_info=True)
+
+
+class _SharePopover:
+    """Two-option share menu: Copy Image or Share on X."""
+
+    def __init__(self, app: "ClaudeBar"):
+        self.app = app
+
+    def show(self, sender):
+        """Show a context menu with share options near the share button."""
+        try:
+            from AppKit import NSMenu, NSMenuItem, NSFont, NSApplication
+
+            menu = NSMenu.alloc().init()
+            menu.setAutoenablesItems_(False)
+
+            # -- Copy Image --
+            item1 = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "  Copy Image", b"copyImage:", ""
+            )
+            item1.setEnabled_(True)
+            handler = self.app._panel._handler
+            if handler:
+                item1.setTarget_(handler)
+            menu.addItem_(item1)
+
+            # -- Share on X --
+            item2 = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "  Share on X", b"shareOnX:", ""
+            )
+            item2.setEnabled_(True)
+            if handler:
+                item2.setTarget_(handler)
+            menu.addItem_(item2)
+
+            # Pop up at mouse location
+            evt = NSApplication.sharedApplication().currentEvent()
+            panel_obj = self.app._panel._panel
+            if evt and panel_obj:
+                NSMenu.popUpContextMenu_withEvent_forView_(
+                    menu, evt, panel_obj.contentView()
+                )
+            else:
+                # Fallback: pop up at status item button
+                btn = self.app._nsapp.nsstatusitem.button()
+                if btn:
+                    menu.popUpMenuPositioningItem_atLocation_inView_(
+                        None, (0, 0), btn
+                    )
+        except Exception:
+            log.debug("_SharePopover.show failed", exc_info=True)
+
+    def copy_image(self):
+        """Render the panel as PNG with watermark and copy to clipboard."""
+        try:
+            from AppKit import (
+                NSBitmapImageRep, NSPasteboard, NSImage,
+                NSGraphicsContext, NSColor, NSFont, NSBezierPath,
+            )
+            from Foundation import (
+                NSMakeRect, NSMakeSize, NSAttributedString,
+                NSFontAttributeName, NSForegroundColorAttributeName,
+            )
+
+            panel = self.app._panel
+            if not panel or not panel._panel:
+                return
+
+            view = panel._panel.contentView()
+            bounds = view.bounds()
+
+            # Create bitmap from current view
+            view.lockFocus()
+            rep = NSBitmapImageRep.alloc().initWithFocusedViewRect_(bounds)
+            view.unlockFocus()
+
+            if not rep:
+                return
+
+            # Build composite image: panel content + watermark bar at bottom
+            w = int(bounds.size.width)
+            h = int(bounds.size.height)
+            watermark_h = 24
+            total_h = h + watermark_h
+
+            img = NSImage.alloc().initWithSize_(NSMakeSize(w, total_h))
+            img.lockFocus()
+
+            # Draw panel content (shifted up by watermark height)
+            rep.drawInRect_(NSMakeRect(0, watermark_h, w, h))
+
+            # Draw watermark bar at the bottom
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.1, 0.1, 0.12, 1.0
+            ).set()
+            NSBezierPath.fillRect_(NSMakeRect(0, 0, w, watermark_h))
+
+            attrs = {
+                NSFontAttributeName: NSFont.systemFontOfSize_weight_(9, 0.3),
+                NSForegroundColorAttributeName: NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                    0.5, 0.5, 0.55, 1.0
+                ),
+            }
+            text = NSAttributedString.alloc().initWithString_attributes_(
+                "AIQuotaBar  \u00b7  github.com/yagcioglutoprak/AIQuotaBar", attrs
+            )
+            text.drawAtPoint_((8, 6))
+
+            # Capture the composite
+            final_rep = NSBitmapImageRep.alloc().initWithFocusedViewRect_(
+                NSMakeRect(0, 0, w, total_h)
+            )
+            img.unlockFocus()
+
+            if not final_rep:
+                return
+
+            # Copy PNG to clipboard  (4 = NSBitmapImageFileTypePNG)
+            png_data = final_rep.representationUsingType_properties_(4, {})
+            if not png_data:
+                return
+
+            pb = NSPasteboard.generalPasteboard()
+            pb.clearContents()
+            pb.setData_forType_(png_data, "public.png")
+
+            log.info("Panel screenshot copied to clipboard")
+            _notify("AIQuotaBar", "Copied!", "Panel screenshot copied to clipboard")
+        except Exception:
+            log.debug("_SharePopover.copy_image failed", exc_info=True)
+
+    def share_on_x(self):
+        """Open X/Twitter with pre-filled usage stats."""
+        try:
+            parts = []
+            data = self.app._last_data
+            if data and data.session:
+                parts.append(f"Claude {data.session.pct}%")
+            for pd in self.app._provider_data:
+                if pd.error:
+                    continue
+                if pd._rows:
+                    best = max(r.pct for r in pd._rows if r.pct is not None) if pd._rows else None
+                    if best is not None:
+                        parts.append(f"{pd.name} {best}%")
+                elif pd.pct is not None:
+                    parts.append(f"{pd.name} {pd.pct}%")
+
+            stats = " \u00b7 ".join(parts) if parts else "my AI usage"
+            text = f"{stats} \u2014 tracking with AIQuotaBar"
+            url = (
+                "https://x.com/intent/post?text="
+                + urllib.parse.quote(text)
+                + "&url="
+                + urllib.parse.quote("https://github.com/yagcioglutoprak/AIQuotaBar")
+            )
+            subprocess.Popen(["open", url])
+        except Exception:
+            log.debug("_SharePopover.share_on_x failed", exc_info=True)
+
+
+class _UsagePanel:
+    """Premium floating panel that replaces the default NSMenu dropdown."""
+
+    PANEL_WIDTH = 340
+    MAX_HEIGHT = 600
+    PAD = 16
+    PROGRESS_H = 6
+    PROGRESS_RADIUS = 3
+    DOT_SIZE = 8
+    SECTION_GAP = 12
+    ROW_GAP = 4
+
+    def __init__(self, app: "ClaudeBar"):
+        self._app = app
+        self._panel = None           # NSPanel instance
+        self._visible = False
+        self._content_view = None    # The NSView inside the scroll view's document
+        self._handler = None         # ObjC click handler instance
+        self._scroll = None
+        self._built = False
+
+    # -- public API -----------------------------------------------------------
+
+    @property
+    def visible(self) -> bool:
+        return self._visible
+
+    def toggle(self):
+        """Show or dismiss the panel."""
+        if self._visible:
+            self.dismiss()
+        else:
+            self.show()
+
+    def show(self):
+        """Build/refresh the panel and show it below the status item."""
+        try:
+            self._ensure_built()
+            self.refresh()
+            self._position_panel()
+            # Fade-in animation
+            self._panel.setAlphaValue_(0.0)
+            self._panel.makeKeyAndOrderFront_(None)
+            from AppKit import NSApplication, NSAnimationContext
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            ctx = NSAnimationContext.currentContext()
+            ctx.setDuration_(0.12)
+            self._panel.animator().setAlphaValue_(1.0)
+            self._visible = True
+        except Exception:
+            log.debug("_UsagePanel.show failed", exc_info=True)
+
+    def dismiss(self):
+        """Hide the panel with a quick fade-out."""
+        try:
+            if self._panel:
+                from AppKit import NSAnimationContext
+                ctx = NSAnimationContext.currentContext()
+                ctx.setDuration_(0.08)
+                self._panel.animator().setAlphaValue_(0.0)
+                # Schedule orderOut after animation
+                from Foundation import NSTimer
+                def _hide(_timer):
+                    try:
+                        self._panel.orderOut_(None)
+                        self._panel.setAlphaValue_(1.0)
+                    except Exception:
+                        pass
+                NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.1, False, _hide)
+        except Exception:
+            if self._panel:
+                self._panel.orderOut_(None)
+        self._visible = False
+
+    def refresh(self):
+        """Rebuild the panel content with current data."""
+        try:
+            if not self._built:
+                return
+            self._rebuild_content()
+        except Exception:
+            log.debug("_UsagePanel.refresh failed", exc_info=True)
+
+    # -- construction ---------------------------------------------------------
+
+    def _ensure_built(self):
+        """Lazily create the NSPanel and its chrome (vibrancy, scroll, etc.)."""
+        if self._built:
+            return
+        _ensure_panel_classes()
+        if _DismissablePanelClass is None:
+            log.warning("Panel ObjC classes not available")
+            return
+
+        from AppKit import (
+            NSVisualEffectView, NSScrollView, NSView,
+            NSBackingStoreBuffered, NSApplication,
+        )
+        from Foundation import NSMakeRect
+
+        # Panel: borderless, non-activating
+        # styleMask: 0 = borderless
+        panel = _DismissablePanelClass.alloc().initWithContentRect_styleMask_backing_defer_(
+            NSMakeRect(0, 0, self.PANEL_WIDTH, 200),
+            0,  # borderless
+            NSBackingStoreBuffered,
+            False,
+        )
+        panel.setLevel_(3)         # NSFloatingWindowLevel
+        panel.setHasShadow_(True)
+        panel.setOpaque_(False)
+        panel.setBackgroundColor_(self._clear_color())
+        panel.setMovableByWindowBackground_(False)
+        panel.setWorksWhenModal_(True)
+        panel.setHidesOnDeactivate_(False)
+        panel._dismiss_callback = self.dismiss
+
+        content = panel.contentView()
+        content.setWantsLayer_(True)
+        content.layer().setCornerRadius_(12)
+        content.layer().setMasksToBounds_(True)
+
+        # Vibrancy background
+        blur = NSVisualEffectView.alloc().initWithFrame_(content.bounds())
+        blur.setAutoresizingMask_(18)  # width + height
+        blur.setBlendingMode_(0)       # behindWindow
+        blur.setMaterial_(3)           # dark
+        blur.setState_(1)              # active
+        content.addSubview_(blur)
+
+        # Scroll view fills the panel
+        scroll = NSScrollView.alloc().initWithFrame_(content.bounds())
+        scroll.setAutoresizingMask_(18)
+        scroll.setHasVerticalScroller_(True)
+        scroll.setDrawsBackground_(False)
+        scroll.setBorderType_(0)
+        content.addSubview_(scroll)
+
+        doc = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, self.PANEL_WIDTH, 200))
+        scroll.setDocumentView_(doc)
+
+        self._panel = panel
+        self._scroll = scroll
+        self._content_view = doc
+        self._blur = blur
+
+        # ObjC handler
+        if _ClickHandlerClass is not None:
+            self._handler = _ClickHandlerClass.alloc().init()
+
+        self._built = True
+
+    def _clear_color(self):
+        from AppKit import NSColor
+        return NSColor.clearColor()
+
+    # -- positioning ----------------------------------------------------------
+
+    def _position_panel(self):
+        """Place the panel below the status bar button, centered."""
+        try:
+            btn = self._app._nsapp.nsstatusitem.button()
+            if not btn:
+                return
+            btn_win = btn.window()
+            if not btn_win:
+                return
+            # Get button frame in screen coordinates
+            btn_frame = btn.frame()
+            screen_rect = btn_win.convertRectToScreen_(btn_frame)
+
+            # Panel top-center aligns with button bottom-center
+            panel_x = screen_rect.origin.x + screen_rect.size.width / 2 - self.PANEL_WIDTH / 2
+            panel_y = screen_rect.origin.y - self._panel.frame().size.height - 4
+
+            # Clamp to screen
+            from AppKit import NSScreen
+            screen = NSScreen.mainScreen()
+            if screen:
+                sf = screen.visibleFrame()
+                panel_x = max(sf.origin.x + 4, min(panel_x, sf.origin.x + sf.size.width - self.PANEL_WIDTH - 4))
+                panel_y = max(sf.origin.y + 4, panel_y)
+
+            from Foundation import NSMakeRect
+            new_frame = NSMakeRect(
+                panel_x, panel_y,
+                self.PANEL_WIDTH,
+                self._panel.frame().size.height,
+            )
+            self._panel.setFrame_display_(new_frame, True)
+        except Exception:
+            log.debug("_position_panel failed", exc_info=True)
+
+    # -- content rebuild ------------------------------------------------------
+
+    def _rebuild_content(self):
+        """Tear down and rebuild all subviews in the document view."""
+        from AppKit import (
+            NSView, NSTextField, NSFont, NSColor, NSButton,
+            NSTextAlignmentLeft, NSTextAlignmentRight,
+        )
+        from Foundation import NSMakeRect
+        import Quartz
+
+        doc = self._content_view
+        # Remove all existing subviews
+        for sv in list(doc.subviews()):
+            sv.removeFromSuperview()
+
+        W = self.PANEL_WIDTH
+        PAD = self.PAD
+        inner = W - PAD * 2
+
+        # We build top-down, tracking y offset from top.
+        # At the end we set the doc height and convert to bottom-up coords.
+        elements = []  # list of (top_y, builder_fn) -- deferred so we know total height
+
+        # We'll accumulate content height
+        y = PAD  # start below top edge
+
+        # ── Header ──────────────────────────────────────────────────────
+        header_h = 24
+        elements.append(('header', y, header_h))
+        y += header_h + 8
+
+        # ── Separator ───────────────────────────────────────────────────
+        elements.append(('sep', y, 1))
+        y += 1 + self.SECTION_GAP
+
+        # ── Provider sections ───────────────────────────────────────────
+        data = self._app._last_data
+        provider_data = self._app._provider_data
+        history = self._app._history
+        history_db = self._app._history_db
+
+        has_any_data = False
+
+        # Claude section
+        if data and any([data.session, data.weekly_all, data.weekly_sonnet]):
+            has_any_data = True
+            # Provider header: dot + name + reset time
+            elements.append(('provider_header', y, 18, 'Claude', '#D97757',
+                             data.session.reset_str if data.session else ''))
+            y += 18 + 6
+
+            # Rows
+            for row in [data.session, data.weekly_all, data.weekly_sonnet]:
+                if row:
+                    elements.append(('limit_row', y, 20, row, '#D97757'))
+                    y += 20 + self.ROW_GAP
+
+            # ETA
+            eta = _calc_eta_minutes(history, "claude")
+            if eta is not None:
+                elements.append(('eta_line', y, 14, eta))
+                y += 14 + 2
+
+            # Sparkline
+            spark = _sparkline(history, "claude")
+            if spark:
+                elements.append(('spark_line', y, 14, spark))
+                y += 14 + 2
+
+            # Hit limit count
+            try:
+                hits = _get_week_limit_hits(history_db, "claude")
+            except Exception:
+                hits = 0
+            if hits > 0:
+                elements.append(('hit_line', y, 14, hits))
+                y += 14 + 2
+
+            y += self.SECTION_GAP
+
+        # ChatGPT section
+        chatgpt_pd = next((pd for pd in provider_data if pd.name == "ChatGPT"), None)
+        if chatgpt_pd and not chatgpt_pd.error:
+            has_any_data = True
+            rows = getattr(chatgpt_pd, "_rows", None) or []
+            reset_str = rows[0].reset_str if rows else ""
+            elements.append(('provider_header', y, 18, 'ChatGPT', '#74AA9C', reset_str))
+            y += 18 + 6
+            for row in rows:
+                elements.append(('limit_row', y, 20, row, '#74AA9C'))
+                y += 20 + self.ROW_GAP
+                hkey = f"chatgpt_{row.label.lower().replace(' ', '_')}"
+                eta = _calc_eta_minutes(history, hkey)
+                if eta is not None:
+                    elements.append(('eta_line', y, 14, eta))
+                    y += 14 + 2
+            y += self.SECTION_GAP
+
+        # Copilot section
+        copilot_pd = next((pd for pd in provider_data if pd.name == "Copilot"), None)
+        if copilot_pd and not copilot_pd.error:
+            has_any_data = True
+            reset_str = ""
+            if copilot_pd.spent is not None and copilot_pd.limit:
+                summary_text = f"{int(copilot_pd.spent)} / {int(copilot_pd.limit)}"
+            else:
+                summary_text = ""
+            elements.append(('provider_header', y, 18, 'Copilot', '#6E40C9', summary_text))
+            y += 18 + 6
+            if copilot_pd.pct is not None:
+                fake_row = LimitRow("Premium Requests", copilot_pd.pct, "")
+                elements.append(('limit_row', y, 20, fake_row, '#6E40C9'))
+                y += 20 + self.ROW_GAP
+            eta = _calc_eta_minutes(history, "copilot")
+            if eta is not None:
+                elements.append(('eta_line', y, 14, eta))
+                y += 14 + 2
+            y += self.SECTION_GAP
+
+        # Cursor section
+        cursor_pd = next((pd for pd in provider_data if pd.name == "Cursor"), None)
+        if cursor_pd and not cursor_pd.error:
+            has_any_data = True
+            rows = getattr(cursor_pd, "_rows", None) or []
+            reset_str = rows[0].reset_str if rows else ""
+            elements.append(('provider_header', y, 18, 'Cursor', '#00A0D1', reset_str))
+            y += 18 + 6
+            for row in rows:
+                elements.append(('limit_row', y, 20, row, '#00A0D1'))
+                y += 20 + self.ROW_GAP
+                hkey = f"cursor_{row.label.lower().replace(' ', '_')}"
+                eta = _calc_eta_minutes(history, hkey)
+                if eta is not None:
+                    elements.append(('eta_line', y, 14, eta))
+                    y += 14 + 2
+            y += self.SECTION_GAP
+
+        # No data placeholder
+        if not has_any_data:
+            elements.append(('placeholder', y, 40))
+            y += 40 + self.SECTION_GAP
+
+        # ── Footer separator ────────────────────────────────────────────
+        elements.append(('sep', y, 1))
+        y += 1 + 8
+
+        # ── Footer ──────────────────────────────────────────────────────
+        footer_h = 20
+        elements.append(('footer', y, footer_h))
+        y += footer_h + PAD
+
+        # ── Set document height and panel height ────────────────────────
+        total_h = min(y, self.MAX_HEIGHT)
+        doc_h = y  # full content height (may exceed panel if scrollable)
+
+        doc.setFrame_(NSMakeRect(0, 0, W, doc_h))
+
+        # Resize panel
+        self._panel.setContentSize_((W, total_h))
+
+        # Now render all elements (converting top_y to bottom-up NSView coords)
+        for elem in elements:
+            kind = elem[0]
+            top_y = elem[1]
+            h = elem[2]
+            real_y = doc_h - top_y - h
+
+            if kind == 'header':
+                self._render_header(doc, PAD, real_y, inner, h, NSTextField, NSFont,
+                                    NSColor, NSButton, NSMakeRect, NSTextAlignmentLeft)
+
+            elif kind == 'sep':
+                sep = NSView.alloc().initWithFrame_(NSMakeRect(PAD, real_y, inner, 1))
+                sep.setWantsLayer_(True)
+                sep.layer().setBackgroundColor_(
+                    Quartz.CGColorCreateGenericRGB(1, 1, 1, 0.08)
+                )
+                doc.addSubview_(sep)
+
+            elif kind == 'provider_header':
+                _, _, _, name, color_hex, right_text = elem
+                self._render_provider_header(
+                    doc, PAD, real_y, inner, h, name, color_hex, right_text,
+                    NSView, NSTextField, NSFont, NSColor, NSMakeRect,
+                    NSTextAlignmentLeft, NSTextAlignmentRight, Quartz,
+                )
+
+            elif kind == 'limit_row':
+                _, _, _, row, color_hex = elem
+                self._render_limit_row(
+                    doc, PAD, real_y, inner, h, row, color_hex,
+                    NSView, NSTextField, NSFont, NSColor, NSMakeRect,
+                    NSTextAlignmentLeft, NSTextAlignmentRight, Quartz,
+                )
+
+            elif kind == 'eta_line':
+                _, _, _, eta_min = elem
+                self._render_small_text(
+                    doc, PAD, real_y, inner, h,
+                    f"\u23f1 ~{_fmt_eta(eta_min)} to limit",
+                    NSTextField, NSFont, NSColor, NSMakeRect,
+                )
+
+            elif kind == 'spark_line':
+                _, _, _, spark_str = elem
+                self._render_small_text(
+                    doc, PAD, real_y, inner, h,
+                    spark_str,
+                    NSTextField, NSFont, NSColor, NSMakeRect,
+                )
+
+            elif kind == 'hit_line':
+                _, _, _, hit_count = elem
+                self._render_small_text(
+                    doc, PAD, real_y, inner, h,
+                    f"Hit limit {hit_count}x this week",
+                    NSTextField, NSFont, NSColor, NSMakeRect,
+                )
+
+            elif kind == 'placeholder':
+                self._render_small_text(
+                    doc, PAD, real_y, inner, h,
+                    "Waiting for data...",
+                    NSTextField, NSFont, NSColor, NSMakeRect,
+                    size=13, weight=0.3,
+                )
+
+            elif kind == 'footer':
+                self._render_footer(doc, PAD, real_y, inner, h,
+                                    NSTextField, NSFont, NSColor, NSButton,
+                                    NSMakeRect, NSTextAlignmentLeft, NSTextAlignmentRight)
+
+        # Scroll to top
+        try:
+            visible_h = self._scroll.contentSize().height
+            if doc_h > visible_h:
+                clip = self._scroll.contentView()
+                clip.scrollToPoint_((0, doc_h - visible_h))
+                self._scroll.reflectScrolledClipView_(clip)
+        except Exception:
+            pass
+
+    # -- render helpers -------------------------------------------------------
+
+    def _render_header(self, parent, x, y, w, h, NSTextField, NSFont,
+                       NSColor, NSButton, NSMakeRect, NSTextAlignmentLeft):
+        """Render: 'AIQuotaBar' title + gear + share buttons."""
+        # Title
+        title = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, w - 60, h))
+        title.setStringValue_("AIQuotaBar")
+        title.setBezeled_(False)
+        title.setDrawsBackground_(False)
+        title.setEditable_(False)
+        title.setSelectable_(False)
+        title.setAlignment_(NSTextAlignmentLeft)
+        title.setFont_(NSFont.systemFontOfSize_weight_(15, 0.56))
+        title.setTextColor_(NSColor.labelColor())
+        parent.addSubview_(title)
+
+        # Share button
+        share_btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + w - 52, y, 24, h))
+        share_btn.setTitle_("\u2197")
+        share_btn.setBordered_(False)
+        share_btn.setFont_(NSFont.systemFontOfSize_(14))
+        if self._handler:
+            share_btn.setTarget_(self._handler)
+            share_btn.setAction_(b"shareClicked:")
+        parent.addSubview_(share_btn)
+
+        # Gear button
+        gear_btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + w - 26, y, 24, h))
+        gear_btn.setTitle_("\u2699")
+        gear_btn.setBordered_(False)
+        gear_btn.setFont_(NSFont.systemFontOfSize_(14))
+        if self._handler:
+            gear_btn.setTarget_(self._handler)
+            gear_btn.setAction_(b"gearClicked:")
+        parent.addSubview_(gear_btn)
+
+    def _render_provider_header(self, parent, x, y, w, h, name, color_hex,
+                                right_text, NSView, NSTextField, NSFont,
+                                NSColor, NSMakeRect, NSTextAlignmentLeft,
+                                NSTextAlignmentRight, Quartz):
+        """Render: colored dot + bold provider name + right-aligned reset text."""
+        # Colored dot
+        dot_y = y + (h - self.DOT_SIZE) / 2
+        dot = NSView.alloc().initWithFrame_(NSMakeRect(x, dot_y, self.DOT_SIZE, self.DOT_SIZE))
+        dot.setWantsLayer_(True)
+        hx = color_hex.lstrip("#")
+        r, g, b = int(hx[0:2], 16) / 255, int(hx[2:4], 16) / 255, int(hx[4:6], 16) / 255
+        dot.layer().setBackgroundColor_(Quartz.CGColorCreateGenericRGB(r, g, b, 1.0))
+        dot.layer().setCornerRadius_(self.DOT_SIZE / 2)
+        dot.layer().setMasksToBounds_(True)
+        parent.addSubview_(dot)
+
+        # Provider name (bold)
+        name_x = x + self.DOT_SIZE + 6
+        name_w = w - self.DOT_SIZE - 6 - 120
+        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(name_x, y, name_w, h))
+        lbl.setStringValue_(name)
+        lbl.setBezeled_(False)
+        lbl.setDrawsBackground_(False)
+        lbl.setEditable_(False)
+        lbl.setSelectable_(False)
+        lbl.setAlignment_(NSTextAlignmentLeft)
+        lbl.setFont_(NSFont.systemFontOfSize_weight_(13, 0.5))
+        lbl.setTextColor_(NSColor.labelColor())
+        parent.addSubview_(lbl)
+
+        # Right text (reset time or count)
+        if right_text:
+            rt = NSTextField.alloc().initWithFrame_(NSMakeRect(x + w - 140, y, 140, h))
+            rt.setStringValue_(right_text)
+            rt.setBezeled_(False)
+            rt.setDrawsBackground_(False)
+            rt.setEditable_(False)
+            rt.setSelectable_(False)
+            rt.setAlignment_(NSTextAlignmentRight)
+            rt.setFont_(NSFont.systemFontOfSize_(11))
+            rt.setTextColor_(NSColor.secondaryLabelColor())
+            parent.addSubview_(rt)
+
+    def _render_limit_row(self, parent, x, y, w, h, row, color_hex,
+                          NSView, NSTextField, NSFont, NSColor, NSMakeRect,
+                          NSTextAlignmentLeft, NSTextAlignmentRight, Quartz):
+        """Render: label + progress bar + pct% text."""
+        label_w = 80
+        pct_w = 40
+        bar_x = x + label_w + 4
+        bar_w = w - label_w - pct_w - 8
+        bar_y = y + (h - self.PROGRESS_H) / 2
+
+        # Label
+        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, label_w, h))
+        lbl.setStringValue_(row.label)
+        lbl.setBezeled_(False)
+        lbl.setDrawsBackground_(False)
+        lbl.setEditable_(False)
+        lbl.setSelectable_(False)
+        lbl.setAlignment_(NSTextAlignmentLeft)
+        lbl.setFont_(NSFont.systemFontOfSize_(11))
+        lbl.setTextColor_(NSColor.secondaryLabelColor())
+        parent.addSubview_(lbl)
+
+        # Track (background)
+        track = NSView.alloc().initWithFrame_(NSMakeRect(bar_x, bar_y, bar_w, self.PROGRESS_H))
+        track.setWantsLayer_(True)
+        track.layer().setBackgroundColor_(
+            Quartz.CGColorCreateGenericRGB(0.15, 0.15, 0.2, 1.0)
+        )
+        track.layer().setCornerRadius_(self.PROGRESS_RADIUS)
+        track.layer().setMasksToBounds_(True)
+        parent.addSubview_(track)
+
+        # Fill
+        fill_w = max(0, bar_w * row.pct / 100)
+        if fill_w > 0:
+            fill = NSView.alloc().initWithFrame_(NSMakeRect(bar_x, bar_y, fill_w, self.PROGRESS_H))
+            fill.setWantsLayer_(True)
+            hx = color_hex.lstrip("#")
+            r, g, b = int(hx[0:2], 16) / 255, int(hx[2:4], 16) / 255, int(hx[4:6], 16) / 255
+            fill.layer().setBackgroundColor_(Quartz.CGColorCreateGenericRGB(r, g, b, 1.0))
+            fill.layer().setCornerRadius_(self.PROGRESS_RADIUS)
+            fill.layer().setMasksToBounds_(True)
+            parent.addSubview_(fill)
+
+        # Percentage text
+        pct_lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x + w - pct_w, y, pct_w, h))
+        pct_lbl.setStringValue_(f"{row.pct}%")
+        pct_lbl.setBezeled_(False)
+        pct_lbl.setDrawsBackground_(False)
+        pct_lbl.setEditable_(False)
+        pct_lbl.setSelectable_(False)
+        pct_lbl.setAlignment_(NSTextAlignmentRight)
+        pct_lbl.setFont_(NSFont.monospacedDigitSystemFontOfSize_weight_(11, 0.3))
+        pct_lbl.setTextColor_(NSColor.labelColor())
+        parent.addSubview_(pct_lbl)
+
+    def _render_small_text(self, parent, x, y, w, h, text,
+                           NSTextField, NSFont, NSColor, NSMakeRect,
+                           size=10, weight=0.0):
+        """Render a small secondary-colored text line."""
+        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, w, h))
+        lbl.setStringValue_(text)
+        lbl.setBezeled_(False)
+        lbl.setDrawsBackground_(False)
+        lbl.setEditable_(False)
+        lbl.setSelectable_(False)
+        lbl.setFont_(NSFont.systemFontOfSize_weight_(size, weight))
+        lbl.setTextColor_(NSColor.secondaryLabelColor())
+        parent.addSubview_(lbl)
+
+    def _render_footer(self, parent, x, y, w, h,
+                       NSTextField, NSFont, NSColor, NSButton,
+                       NSMakeRect, NSTextAlignmentLeft, NSTextAlignmentRight):
+        """Render: 'Updated HH:MM' left + 'Refresh' button right."""
+        updated = self._app._last_updated
+        if updated:
+            ts = updated.strftime("%H:%M")
+        else:
+            ts = "--:--"
+        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, w - 80, h))
+        lbl.setStringValue_(f"Updated {ts}")
+        lbl.setBezeled_(False)
+        lbl.setDrawsBackground_(False)
+        lbl.setEditable_(False)
+        lbl.setSelectable_(False)
+        lbl.setAlignment_(NSTextAlignmentLeft)
+        lbl.setFont_(NSFont.systemFontOfSize_(10))
+        lbl.setTextColor_(NSColor.tertiaryLabelColor())
+        parent.addSubview_(lbl)
+
+        # Refresh button
+        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + w - 70, y, 70, h))
+        btn.setTitle_("\u21bb Refresh")
+        btn.setBordered_(False)
+        btn.setFont_(NSFont.systemFontOfSize_(10))
+        if self._handler:
+            btn.setTarget_(self._handler)
+            btn.setAction_(b"refreshClicked:")
+        parent.addSubview_(btn)
+
+
 # -- app -----------------------------------------------------------------------
 
 class ClaudeBar(rumps.App):
@@ -1046,6 +1946,11 @@ class ClaudeBar(rumps.App):
 
         if not _is_login_item():
             _add_login_item()
+
+        # Floating panel (premium UI that replaces NSMenu)
+        self._panel = _UsagePanel(self)
+        self._share_popover = _SharePopover(self)
+        self._click_handler_inst = None   # set in _deferred_welcome
 
         self._rebuild_menu(None)
         self._timer = rumps.Timer(self._on_timer, self._refresh_interval)
@@ -1397,7 +2302,85 @@ class ClaudeBar(rumps.App):
     def _deferred_welcome(self, _timer):
         """Runs once after the run loop is active, then stops itself."""
         _timer.stop()
+        self._hook_status_button()
         self._check_widget_status()
+
+    def _hook_status_button(self):
+        """Replace NSMenu with panel toggle on the status item button click."""
+        try:
+            _ensure_panel_classes()
+            if _ClickHandlerClass is None:
+                log.warning("Cannot hook status button: ObjC classes unavailable")
+                return
+
+            btn = self._nsapp.nsstatusitem.button()
+            if not btn:
+                log.warning("Cannot hook status button: button() returned None")
+                return
+
+            # Keep original menu reference so rumps internals don't break
+            self._original_menu = self._nsapp.nsstatusitem.menu()
+
+            # Build a minimal right-click menu (fallback with Quit)
+            from AppKit import NSMenu, NSMenuItem
+            fallback = NSMenu.alloc().init()
+            fallback.setAutoenablesItems_(False)
+            quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Quit", b"terminate:", "q"
+            )
+            fallback.addItem_(quit_item)
+
+            # Remove menu from status item so clicks route to button action
+            self._nsapp.nsstatusitem.setMenu_(None)
+
+            # Set up click handler
+            handler = _ClickHandlerClass.alloc().init()
+            type(handler)._toggle_fn = lambda: self._panel.toggle()
+            type(handler)._refresh_fn = lambda: self._do_refresh(None)
+            type(handler)._share_fn = lambda sender=None: self._share_popover.show(sender)
+            type(handler)._copy_image_fn = lambda: self._share_popover.copy_image()
+            type(handler)._share_on_x_fn = lambda: self._share_popover.share_on_x()
+            type(handler)._show_menu_fn = lambda: self._show_fallback_menu()
+            type(handler)._gear_menu_fn = lambda: self._get_settings_menu()
+            self._click_handler_inst = handler
+
+            btn.setTarget_(handler)
+            btn.setAction_(b"togglePanel:")
+
+            # Accept both left and right mouse up so we can detect right-click
+            # NSLeftMouseUpMask=4, NSRightMouseUpMask=16
+            btn.sendActionOn_(4 | 16)
+
+            log.info("Status button hooked for panel toggle")
+        except Exception:
+            log.debug("_hook_status_button failed", exc_info=True)
+
+    def _show_fallback_menu(self):
+        """Show the full NSMenu on right-click (fallback for settings/quit)."""
+        try:
+            # Dismiss the panel first if visible
+            if self._panel and self._panel.visible:
+                self._panel.dismiss()
+
+            # Use the current rumps-managed menu (always up to date from _rebuild_menu)
+            ns_menu = self._menu._menu if hasattr(self._menu, '_menu') else None
+            if ns_menu is None:
+                ns_menu = getattr(self, '_original_menu', None)
+            if ns_menu:
+                self._nsapp.nsstatusitem.popUpStatusItemMenu_(ns_menu)
+        except Exception:
+            log.debug("_show_fallback_menu failed", exc_info=True)
+
+    def _get_settings_menu(self):
+        """Return the full NSMenu for use as a settings popover from the gear button."""
+        try:
+            ns_menu = self._menu._menu if hasattr(self._menu, '_menu') else None
+            if ns_menu is None:
+                ns_menu = getattr(self, '_original_menu', None)
+            return ns_menu
+        except Exception:
+            log.debug("_get_settings_menu failed", exc_info=True)
+            return None
 
     def _check_widget_status(self):
         """Show startup info about what the app is doing."""
@@ -1866,6 +2849,12 @@ class ClaudeBar(rumps.App):
         else:
             self.title = "\u25c6"
         self._rebuild_menu(data)
+        # Refresh the floating panel if it's currently visible
+        try:
+            if self._panel and self._panel.visible:
+                self._panel.refresh()
+        except Exception:
+            log.debug("panel refresh in _apply failed", exc_info=True)
 
     def _fetch_providers(self):
         """Fetch all configured third-party API providers (sync, called from fetch thread)."""
