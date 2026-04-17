@@ -21,8 +21,9 @@ from aiquotabar.config import (
 )
 from aiquotabar.providers import (
     LimitRow, UsageData, ProviderData, parse_usage, fetch_raw,
-    fetch_claude_code_stats, PROVIDER_REGISTRY, COOKIE_PROVIDERS,
+    fetch_claude_code_stats, COOKIE_DETECTORS, PROVIDER_REGISTRY, COOKIE_PROVIDERS,
     CurlHTTPError, parse_cookie_string,
+    minimize_cookie_string,
     _auto_detect_cookies, _auto_detect_chatgpt_cookies,
     _auto_detect_copilot_cookies, _auto_detect_cursor_cookies,
     _warn_keychain_once, _fmt_reset, _BROWSER_COOKIE3_OK,
@@ -2911,27 +2912,6 @@ class ClaudeBar(rumps.App):
 
     def _fetch_providers(self):
         """Fetch all configured third-party API providers (sync, called from fetch thread)."""
-        # Auto-detect ChatGPT cookies if not saved yet
-        _cookie_detectors = {
-            "chatgpt_cookies": _auto_detect_chatgpt_cookies,
-            "copilot_cookies": _auto_detect_copilot_cookies,
-            "cursor_cookies":  _auto_detect_cursor_cookies,
-        }
-        for cfg_key in COOKIE_PROVIDERS:
-            with self._config_lock:
-                has_key = self._has_secret_value(cfg_key)
-            if not has_key:
-                detect_fn = _cookie_detectors.get(cfg_key)
-                if detect_fn:
-                    ck = detect_fn()
-                    if ck:
-                        with self._config_lock:
-                            if not self._set_secret_value(
-                                cfg_key, ck,
-                                f"Could not save {cfg_key} to Keychain",
-                            ):
-                                continue
-
         with self._config_lock:
             keys_snapshot = {
                 k: self._get_secret_value(
@@ -2999,12 +2979,8 @@ class ClaudeBar(rumps.App):
         def _cb(_sender):
             if cfg_key in COOKIE_PROVIDERS:
                 # Cookie-based: re-run auto-detect
-                _detectors = {
-                    "chatgpt_cookies": _auto_detect_chatgpt_cookies,
-                    "copilot_cookies": _auto_detect_copilot_cookies,
-                    "cursor_cookies":  _auto_detect_cursor_cookies,
-                }
-                detect_fn = _detectors.get(cfg_key)
+                detector_info = COOKIE_DETECTORS.get(cfg_key)
+                detect_fn = detector_info[0] if detector_info else None
                 if detect_fn:
                     ck = detect_fn()
                     if ck:
@@ -3203,8 +3179,16 @@ class ClaudeBar(rumps.App):
             ) or "",
         )
         if key:
+            normalized = minimize_cookie_string("cookie_str", key.strip())
+            if not normalized:
+                _notify(
+                    "Claude Usage Bar",
+                    "No supported Claude cookies found",
+                    "Paste cookies that include sessionKey and lastActiveOrg.",
+                )
+                return
             if not self._set_secret_value(
-                "cookie_str", key.strip(),
+                "cookie_str", normalized,
                 "Could not save Claude cookies to Keychain",
             ):
                 return
@@ -3221,8 +3205,16 @@ class ClaudeBar(rumps.App):
                 "Copy your cookie string from Chrome DevTools first.",
             )
             return
+        normalized = minimize_cookie_string("cookie_str", text)
+        if not normalized:
+            _notify(
+                "Claude Usage Bar",
+                "No supported Claude cookies found",
+                "Copy the cookie header from claude.ai first.",
+            )
+            return
         if not self._set_secret_value(
-            "cookie_str", text,
+            "cookie_str", normalized,
             "Could not save Claude cookies to Keychain",
         ):
             return

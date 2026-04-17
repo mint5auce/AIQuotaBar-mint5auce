@@ -116,7 +116,7 @@ cd AIQuotaBarWidget && ./build_widget.sh
 
 ## Features
 
-- **Zero-setup auth** — reads cookies directly from your browser (Chrome, Arc, Brave, Edge, Firefox, Safari)
+- **Zero-setup auth for Claude** — reads the minimum Claude cookies it needs from your browser (Chrome, Arc, Brave, Edge, Firefox, Safari)
 - **Claude + ChatGPT + Cursor + Copilot** — tracks Claude.ai session/weekly limits, ChatGPT rate limits, Cursor Auto/API usage, and GitHub Copilot premium requests — all in one place
 - **Desktop widget** — native macOS WidgetKit widget with brand-colored progress bars
 - **Multi-provider** — add OpenAI, MiniMax, GLM (Zhipu) API keys to see spending alongside usage
@@ -169,6 +169,15 @@ To upgrade later, rerun the install command, update via Homebrew, or pull the re
 ## How it works
 
 The app calls the same private usage API that `claude.ai/settings/usage` uses. It authenticates using your browser's existing session cookies (read locally — never transmitted anywhere except to `claude.ai`).
+
+Cookie collection is minimized per provider:
+
+- Claude: `sessionKey`, `lastActiveOrg`, `routingHint`, and Cloudflare cookies if present
+- ChatGPT: `__Secure-next-auth.session-token`
+- Copilot: `user_session`, `logged_in`, `dotcom_user`
+- Cursor: `WorkosCursorSessionToken`
+
+Claude cookies auto-detect on startup. ChatGPT, Copilot, and Cursor cookies are only detected when you explicitly enable those providers from the menu.
 
 [`curl_cffi`](https://github.com/yifeikong/curl_cffi) is used to mimic a Chrome TLS fingerprint, which is required to pass Cloudflare's bot protection.
 

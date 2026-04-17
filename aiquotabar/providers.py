@@ -71,6 +71,27 @@ _IMPERSONATE = "safari184"
 # Cloudflare-bound cookies are tied to the real browser fingerprint —
 # sending them from a different TLS stack causes a mismatch → 403.
 CF_COOKIE_KEYS = frozenset({"cf_clearance", "__cf_bm", "_cfuvid"})
+COOKIE_KEY_ALLOWLISTS: dict[str, tuple[str, ...]] = {
+    "cookie_str": (
+        "sessionKey",
+        "lastActiveOrg",
+        "routingHint",
+        "cf_clearance",
+        "__cf_bm",
+        "_cfuvid",
+    ),
+    "chatgpt_cookies": (
+        "__Secure-next-auth.session-token",
+    ),
+    "copilot_cookies": (
+        "user_session",
+        "logged_in",
+        "dotcom_user",
+    ),
+    "cursor_cookies": (
+        "WorkosCursorSessionToken",
+    ),
+}
 
 
 def parse_cookie_string(raw: str) -> dict:
@@ -85,6 +106,20 @@ def parse_cookie_string(raw: str) -> dict:
             k, _, v = part.partition("=")
             cookies[k.strip()] = v.strip()
     return cookies
+
+
+def minimize_cookie_map(provider_key: str, cookies: dict) -> dict:
+    """Return only the allowlisted cookies for the given provider key."""
+    allowed = COOKIE_KEY_ALLOWLISTS.get(provider_key)
+    if not allowed:
+        return dict(cookies)
+    return {k: v for k, v in cookies.items() if k in allowed}
+
+
+def minimize_cookie_string(provider_key: str, raw: str) -> str:
+    """Normalize a cookie string down to the provider allowlist."""
+    cookies = minimize_cookie_map(provider_key, parse_cookie_string(raw))
+    return "; ".join(f"{k}={v}" for k, v in cookies.items())
 
 
 def _strip_cf_cookies(cookies: dict) -> dict:
@@ -440,7 +475,7 @@ def fetch_cursor(cookie_str: str) -> ProviderData:
 
 
 # Registry: config_key -> (display_name, fetch_fn)
-# chatgpt_cookies / copilot_cookies are cookie-based (auto-detected);
+# chatgpt_cookies / copilot_cookies / cursor_cookies are cookie-based;
 # others are API key-based.
 PROVIDER_REGISTRY: dict[str, tuple[str, callable]] = {
     "chatgpt_cookies": ("ChatGPT",     fetch_chatgpt),
@@ -451,8 +486,9 @@ PROVIDER_REGISTRY: dict[str, tuple[str, callable]] = {
     "glm_key":         ("GLM (Zhipu)", fetch_glm),
 }
 
-# Cookie-based providers (auto-detected from browser, not manually entered)
+# Cookie-based optional providers (detected only when explicitly enabled)
 COOKIE_PROVIDERS = {"chatgpt_cookies", "copilot_cookies", "cursor_cookies"}
+COOKIE_DETECTORS: dict[str, tuple[callable, str]] = {}
 
 
 # ── Claude Code local stats ───────────────────────────────────────────────────
@@ -520,6 +556,7 @@ import sys, json
 
 domain  = sys.argv[1]
 target  = sys.argv[2]
+allowed = set(json.loads(sys.argv[3]))
 
 BROWSERS = [
     'firefox', 'librewolf', 'chrome', 'arc', 'brave',
@@ -544,7 +581,11 @@ try:
             if target not in cookies:
                 continue
             expires = cookies[target].expires or 0
-            cookie_str = '; '.join(f'{k}={c.value}' for k, c in cookies.items())
+            selected = {
+                k: c.value for k, c in cookies.items()
+                if k in allowed
+            }
+            cookie_str = '; '.join(f'{k}={v}' for k, v in selected.items())
             candidates.append((expires, cookie_str))
         except Exception:
             pass
@@ -561,11 +602,12 @@ print(json.dumps(result))
 """
 
 
-def _run_cookie_detection(domain: str, target_cookie: str) -> str | None:
+def _run_cookie_detection(domain: str, target_cookie: str, provider_key: str) -> str | None:
     """Run browser_cookie3 in an isolated child process (crash-safe)."""
     try:
+        allowlist = sorted(set(COOKIE_KEY_ALLOWLISTS.get(provider_key, ())) | {target_cookie})
         r = subprocess.run(
-            [sys.executable, "-c", _DETECT_SCRIPT, domain, target_cookie],
+            [sys.executable, "-c", _DETECT_SCRIPT, domain, target_cookie, json.dumps(allowlist)],
             capture_output=True, text=True, timeout=60,
         )
         has_result = bool(r.stdout.strip())
@@ -585,25 +627,34 @@ def _auto_detect_cookies() -> str | None:
     if not _BROWSER_COOKIE3_OK:
         return None
     _warn_keychain_once()
-    return _run_cookie_detection("claude.ai", "sessionKey")
+    return _run_cookie_detection("claude.ai", "sessionKey", "cookie_str")
 
 
 def _auto_detect_chatgpt_cookies() -> str | None:
     """Detect chatgpt.com session cookies from the browser (crash-safe subprocess)."""
     if not _BROWSER_COOKIE3_OK:
         return None
-    return _run_cookie_detection("chatgpt.com", "__Secure-next-auth.session-token")
+    return _run_cookie_detection(
+        "chatgpt.com", "__Secure-next-auth.session-token", "chatgpt_cookies",
+    )
 
 
 def _auto_detect_copilot_cookies() -> str | None:
     """Detect github.com session cookies from the browser (crash-safe subprocess)."""
     if not _BROWSER_COOKIE3_OK:
         return None
-    return _run_cookie_detection("github.com", "user_session")
+    return _run_cookie_detection("github.com", "user_session", "copilot_cookies")
 
 
 def _auto_detect_cursor_cookies() -> str | None:
     """Detect cursor.com session cookies from the browser (crash-safe subprocess)."""
     if not _BROWSER_COOKIE3_OK:
         return None
-    return _run_cookie_detection("cursor.com", "WorkosCursorSessionToken")
+    return _run_cookie_detection("cursor.com", "WorkosCursorSessionToken", "cursor_cookies")
+
+
+COOKIE_DETECTORS = {
+    "chatgpt_cookies": (_auto_detect_chatgpt_cookies, "ChatGPT"),
+    "copilot_cookies": (_auto_detect_copilot_cookies, "Copilot"),
+    "cursor_cookies": (_auto_detect_cursor_cookies, "Cursor"),
+}
