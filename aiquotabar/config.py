@@ -63,8 +63,6 @@ LIMIT_HIT_PCT = 95
 BURN_WINDOW = 30 * 60       # regression window: 30 minutes
 MIN_SPAN_SECS = 5 * 60      # need >=5 min of data before showing ETA
 RESET_DROP_PCT = 30          # pct drop that signals a reset
-UPDATE_CHECK_INTERVAL = 4 * 3600   # check for updates every 4 hours
-
 HISTORY_COLORS = {
     "claude": "#D97757", "chatgpt": "#74AA9C",
     "copilot": "#6E40C9", "cursor": "#00A0D1",

@@ -16,7 +16,7 @@ from aiquotabar.config import (
     log, load_config, save_config, notif_enabled, set_notif,
     REFRESH_INTERVALS, DEFAULT_REFRESH,
     WARN_THRESHOLD, CRIT_THRESHOLD, PACING_ALERT_MINUTES,
-    UPDATE_CHECK_INTERVAL, HISTORY_COLORS,
+    HISTORY_COLORS,
     WIDGET_CACHE_DIR,
 )
 from aiquotabar.providers import (
@@ -35,7 +35,6 @@ from aiquotabar.history import (
     _fetch_history_data, _nscolor,
 )
 from aiquotabar.widget import _write_widget_cache, _is_widget_installed
-from aiquotabar.update import _check_and_apply_update, _restart_app
 
 
 # -- Brand icon helpers --------------------------------------------------------
@@ -1942,8 +1941,6 @@ class ClaudeBar(rumps.App):
         self._config_lock = threading.Lock()
         self._db_lock = threading.Lock()
         self._login_item_cached: bool | None = None
-        self._last_update_check = self.config.get("last_update_check", 0)
-
         if not _is_login_item():
             _add_login_item()
 
@@ -2543,14 +2540,6 @@ class ClaudeBar(rumps.App):
             self._post_data(data)          # <- main thread applies title + menu
             _write_widget_cache(data, self._provider_data, self._cc_stats, self.config)
 
-            # -- silent auto-update --
-            if time.time() - self._last_update_check > UPDATE_CHECK_INTERVAL:
-                self._last_update_check = time.time()
-                with self._config_lock:
-                    self.config["last_update_check"] = self._last_update_check
-                    save_config(self.config)
-                if _check_and_apply_update():
-                    _restart_app()
         except CurlHTTPError as e:
             resp = getattr(e, "response", None)
             code = getattr(resp, "status_code", 0) or 0

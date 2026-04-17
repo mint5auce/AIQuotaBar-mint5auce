@@ -34,6 +34,8 @@ aiquotabar &
 
 The app launches immediately and auto-detects your Claude, ChatGPT, Cursor, and Copilot sessions from Chrome, Arc, Brave, Edge, Firefox, or Safari — no copy-pasting cookies.
 
+Updates are manual: rerun the installer, use Homebrew, or pull the repo yourself. The app does not self-update in the background.
+
 ---
 
 ### Why I built this
@@ -159,6 +161,8 @@ cd AIQuotaBar
 pip install -r requirements.txt
 python3 claude_bar.py
 ```
+
+To upgrade later, rerun the install command, update via Homebrew, or pull the repo manually and reinstall dependencies.
 
 ---
 
