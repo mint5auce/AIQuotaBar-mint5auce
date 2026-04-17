@@ -27,6 +27,10 @@ from aiquotabar.providers import (
     _auto_detect_copilot_cookies, _auto_detect_cursor_cookies,
     _warn_keychain_once, _fmt_reset, _BROWSER_COOKIE3_OK,
 )
+from aiquotabar.secrets import (
+    SecretStoreError, delete_secret, get_secret, has_secret,
+    migrate_secrets_from_config, set_secret,
+)
 from aiquotabar.history import (
     _load_history, _save_history, _append_history,
     _calc_burn_rate, _calc_eta_minutes, _fmt_eta, _sparkline,
@@ -1914,6 +1918,7 @@ class ClaudeBar(rumps.App):
         super().__init__("\u25c6", quit_button=None)
         self.config = load_config()
         purge_compromised_logs_once(self.config)
+        migration = migrate_secrets_from_config(self.config)
         self._last_raw: dict = {}
         self._last_data: UsageData | None = None
         self._provider_data: list[ProviderData] = []
@@ -1942,6 +1947,8 @@ class ClaudeBar(rumps.App):
         self._config_lock = threading.Lock()
         self._db_lock = threading.Lock()
         self._login_item_cached: bool | None = None
+        self._last_secret_store_error = 0.0
+        self._pending_secret_migration_failures = migration.failed
         if not _is_login_item():
             _add_login_item()
 
@@ -1971,6 +1978,47 @@ class ClaudeBar(rumps.App):
             self._history_db.close()
         except Exception:
             pass
+
+    def _notify_secret_store_error(self, action: str):
+        now = time.time()
+        if now - self._last_secret_store_error < 30:
+            return
+        self._last_secret_store_error = now
+        _notify(
+            "AIQuotaBar",
+            "Could not access macOS Keychain",
+            f"{action}. Unlock Keychain Access and try again.",
+        )
+
+    def _get_secret_value(self, key: str, action: str) -> str | None:
+        try:
+            return get_secret(key)
+        except SecretStoreError:
+            self._notify_secret_store_error(action)
+            return None
+
+    def _has_secret_value(self, key: str, action: str = "Could not read saved credentials") -> bool:
+        try:
+            return has_secret(key)
+        except SecretStoreError:
+            self._notify_secret_store_error(action)
+            return False
+
+    def _set_secret_value(self, key: str, value: str, action: str) -> bool:
+        try:
+            set_secret(key, value)
+            return True
+        except SecretStoreError:
+            self._notify_secret_store_error(action)
+            return False
+
+    def _delete_secret_value(self, key: str, action: str) -> bool:
+        try:
+            delete_secret(key)
+            return True
+        except SecretStoreError:
+            self._notify_secret_store_error(action)
+            return False
 
     def _is_login_item_cached(self) -> bool:
         if self._login_item_cached is None:
@@ -2224,11 +2272,12 @@ class ClaudeBar(rumps.App):
         # API providers submenu
         providers_menu = rumps.MenuItem("API Providers")
         for cfg_key, (name, _) in PROVIDER_REGISTRY.items():
-            is_set = bool(self.config.get(cfg_key))
+            is_set = self._has_secret_value(cfg_key)
+            checkmark = "\u2713" if is_set else "+"
             if cfg_key in COOKIE_PROVIDERS:
-                label = f"{'\u2713' if is_set else '+'} {name} (auto-detect)"
+                label = f"{checkmark} {name} (auto-detect)"
             else:
-                label = f"{'\u2713' if is_set else '+'} {name} API Key\u2026"
+                label = f"{checkmark} {name} API Key\u2026"
             providers_menu.add(rumps.MenuItem(
                 label, callback=self._make_provider_key_cb(cfg_key, name)
             ))
@@ -2302,6 +2351,9 @@ class ClaudeBar(rumps.App):
         _timer.stop()
         self._hook_status_button()
         self._check_widget_status()
+        if self._pending_secret_migration_failures:
+            self._notify_secret_store_error("Could not migrate saved credentials to Keychain")
+            self._pending_secret_migration_failures = []
 
     def _hook_status_button(self):
         """Replace NSMenu with panel toggle on the status item button click."""
@@ -2470,13 +2522,20 @@ class ClaudeBar(rumps.App):
 
         try:
             with self._config_lock:
-                sk = self.config.get("cookie_str")
+                sk = self._get_secret_value(
+                    "cookie_str", "Could not read saved Claude cookies from Keychain"
+                )
             if not sk:
                 sk = _auto_detect_cookies()
                 if sk:
                     with self._config_lock:
-                        self.config["cookie_str"] = sk
-                        save_config(self.config)
+                        if not self._set_secret_value(
+                            "cookie_str", sk,
+                            "Could not save Claude cookies to Keychain",
+                        ):
+                            self._post_title("\u25c6")
+                            self._fetching = False
+                            return
             if not sk:
                 self._post_title("\u25c6")
                 self._fetching = False
@@ -2553,8 +2612,12 @@ class ClaudeBar(rumps.App):
                     cookie_str = _auto_detect_cookies()
                     if cookie_str:
                         with self._config_lock:
-                            self.config["cookie_str"] = cookie_str
-                            save_config(self.config)
+                            if not self._set_secret_value(
+                                "cookie_str", cookie_str,
+                                "Could not refresh Claude cookies in Keychain",
+                            ):
+                                self._post_title("\u25c6 !")
+                                return
                         self._warned_pcts.clear()
                         log.info("Auth failed \u2014 auto-detected fresh cookies from browser")
                         self._schedule_fetch()
@@ -2856,18 +2919,26 @@ class ClaudeBar(rumps.App):
         }
         for cfg_key in COOKIE_PROVIDERS:
             with self._config_lock:
-                has_key = bool(self.config.get(cfg_key))
+                has_key = self._has_secret_value(cfg_key)
             if not has_key:
                 detect_fn = _cookie_detectors.get(cfg_key)
                 if detect_fn:
                     ck = detect_fn()
                     if ck:
                         with self._config_lock:
-                            self.config[cfg_key] = ck
-                            save_config(self.config)
+                            if not self._set_secret_value(
+                                cfg_key, ck,
+                                f"Could not save {cfg_key} to Keychain",
+                            ):
+                                continue
 
         with self._config_lock:
-            keys_snapshot = {k: self.config.get(k) for k in PROVIDER_REGISTRY}
+            keys_snapshot = {
+                k: self._get_secret_value(
+                    k, f"Could not read saved {k} from Keychain"
+                )
+                for k in PROVIDER_REGISTRY
+            }
         tasks = []
         for cfg_key, (name, fetch_fn) in PROVIDER_REGISTRY.items():
             key = keys_snapshot.get(cfg_key)
@@ -2937,8 +3008,11 @@ class ClaudeBar(rumps.App):
                 if detect_fn:
                     ck = detect_fn()
                     if ck:
-                        self.config[cfg_key] = ck
-                        save_config(self.config)
+                        if not self._set_secret_value(
+                            cfg_key, ck,
+                            f"Could not save {name} cookies to Keychain",
+                        ):
+                            return
                         _notify("Claude Usage Bar", f"{name} cookies updated \u2713", "Fetching usage\u2026")
                         self._schedule_fetch()
                     else:
@@ -2946,7 +3020,9 @@ class ClaudeBar(rumps.App):
                                 f"Make sure you are logged into {name} in your browser.")
                 return
             # API key-based
-            current = self.config.get(cfg_key, "")
+            current = self._get_secret_value(
+                cfg_key, f"Could not read saved {name} API key from Keychain"
+            ) or ""
             key = _ask_text(
                 title=f"Claude Usage Bar \u2014 {name}",
                 prompt=f"Paste your {name} API key.\nLeave blank to remove.",
@@ -2955,10 +3031,16 @@ class ClaudeBar(rumps.App):
             if key is None:
                 return
             if key.strip():
-                self.config[cfg_key] = key.strip()
+                if not self._set_secret_value(
+                    cfg_key, key.strip(),
+                    f"Could not save {name} API key to Keychain",
+                ):
+                    return
             else:
-                self.config.pop(cfg_key, None)
-            save_config(self.config)
+                if not self._delete_secret_value(
+                    cfg_key, f"Could not remove {name} API key from Keychain"
+                ):
+                    return
             self._schedule_fetch()
         return _cb
 
@@ -3116,11 +3198,16 @@ class ClaudeBar(rumps.App):
                 "  3. In Headers, find the 'cookie:' row\n"
                 "  4. Right-click it \u2192 Copy value  (long string with semicolons)"
             ),
-            default=self.config.get("cookie_str", ""),
+            default=self._get_secret_value(
+                "cookie_str", "Could not read saved Claude cookies from Keychain"
+            ) or "",
         )
         if key:
-            self.config["cookie_str"] = key.strip()
-            save_config(self.config)
+            if not self._set_secret_value(
+                "cookie_str", key.strip(),
+                "Could not save Claude cookies to Keychain",
+            ):
+                return
             self._warned_pcts.clear()
             self._auth_fail_count = 0
             self._schedule_fetch()
@@ -3134,8 +3221,11 @@ class ClaudeBar(rumps.App):
                 "Copy your cookie string from Chrome DevTools first.",
             )
             return
-        self.config["cookie_str"] = text
-        save_config(self.config)
+        if not self._set_secret_value(
+            "cookie_str", text,
+            "Could not save Claude cookies to Keychain",
+        ):
+            return
         self._warned_pcts.clear()
         self._auth_fail_count = 0
         self._schedule_fetch()
@@ -3165,8 +3255,11 @@ class ClaudeBar(rumps.App):
         """Background: silently try to grab cookies from the browser on first run."""
         cookie_str = _auto_detect_cookies()
         if cookie_str:
-            self.config["cookie_str"] = cookie_str
-            save_config(self.config)
+            if not self._set_secret_value(
+                "cookie_str", cookie_str,
+                "Could not save Claude cookies to Keychain",
+            ):
+                return
             _notify(
                 "Claude Usage Bar",
                 "Cookies auto-detected from your browser \u2713",
@@ -3196,8 +3289,11 @@ class ClaudeBar(rumps.App):
             cookie_str = None
         if cookie_str:
             with self._config_lock:
-                self.config["cookie_str"] = cookie_str
-                save_config(self.config)
+                if not self._set_secret_value(
+                    "cookie_str", cookie_str,
+                    "Could not save Claude cookies to Keychain",
+                ):
+                    return
             self._warned_pcts.clear()
             self._auth_fail_count = 0
             _notify("Claude Usage Bar", "Cookies auto-detected \u2713", "Fetching usage data\u2026")

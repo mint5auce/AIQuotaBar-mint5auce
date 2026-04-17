@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from aiquotabar.config import log, WIDGET_HOST_APP, WIDGET_CACHE_DIR, WIDGET_CACHE_FILE
 from aiquotabar.providers import LimitRow, UsageData, ProviderData
+from aiquotabar.secrets import SecretStoreError, has_secret
 
 
 def _write_widget_cache(
@@ -30,16 +31,24 @@ def _write_widget_cache(
         def _active_providers(cfg: dict) -> list[str]:
             """Return list of provider IDs the user has configured."""
             active = []
-            if cfg.get("cookie_str"):
-                active.append("claude")
+            try:
+                if has_secret("cookie_str"):
+                    active.append("claude")
+            except SecretStoreError:
+                if data.session or data.weekly_all or data.weekly_sonnet:
+                    active.append("claude")
             _key_map = {
                 "chatgpt_cookies": "chatgpt",
                 "copilot_cookies": "copilot",
                 "cursor_cookies":  "cursor",
             }
             for cfg_key, prov_id in _key_map.items():
-                if cfg.get(cfg_key):
-                    active.append(prov_id)
+                try:
+                    if has_secret(cfg_key):
+                        active.append(prov_id)
+                except SecretStoreError:
+                    if any(p.name.lower() == prov_id for p in providers):
+                        active.append(prov_id)
             # Fallback: always show at least Claude
             return active or ["claude"]
 
