@@ -109,24 +109,9 @@ elif command -v xcodebuild &>/dev/null && [ -d "$INSTALL_DIR/AIQuotaBarWidget/AI
         echo "  ⚠  Widget build failed (non-fatal)"
     fi
 else
-    echo "  ↓  Installing pre-built desktop widget…"
-    WIDGET_URL="https://github.com/yagcioglutoprak/AIQuotaBar/releases/latest/download/AIQuotaBarWidget.zip"
-    WIDGET_TMP="/tmp/AIQuotaBarWidget_$$.zip"
-    if curl -fsSL -o "$WIDGET_TMP" "$WIDGET_URL" 2>/dev/null; then
-        rm -rf "$WIDGET_APP"
-        ditto -x -k "$WIDGET_TMP" /Applications/
-        xattr -dr com.apple.quarantine "$WIDGET_APP" 2>/dev/null || true
-        rm -f "$WIDGET_TMP"
-        # Launch once to register widget with the system
-        open "$WIDGET_APP"
-        sleep 2
-        osascript -e 'quit app "AIQuotaBarHost"' 2>/dev/null || true
-        echo "  ✓  Desktop widget installed"
-        WIDGET_INSTALLED=true
-    else
-        echo "  ⊘  Widget: download failed (non-fatal, skipping)"
-        rm -f "$WIDGET_TMP"
-    fi
+    echo "  ⊘  Widget: skipped (Xcode not found)"
+    echo "     Build it later from source with:"
+    echo "       cd \"$INSTALL_DIR/AIQuotaBarWidget\" && ./build_widget.sh"
 fi
 
 if [ "$WIDGET_INSTALLED" = true ]; then

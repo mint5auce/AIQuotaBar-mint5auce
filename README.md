@@ -102,7 +102,7 @@ Native macOS WidgetKit widget — see your AI usage right on your desktop or in 
 
 **Medium widget:** Side-by-side breakdown with session limits, weekly caps, progress bars, and reset times.
 
-The widget syncs automatically with the menu bar app — no extra setup. Data updates every 60 seconds.
+The widget syncs automatically with the menu bar app — no extra setup after you build and install it locally. Data updates every 60 seconds.
 
 ```bash
 # Build the widget (requires Xcode)
@@ -111,6 +111,8 @@ cd AIQuotaBarWidget && ./build_widget.sh
 ```
 
 > The widget is entirely optional — the menu bar app works without it. Requires macOS 14+ and Xcode 15+.
+
+> For security, the one-line installer does not download or auto-launch a prebuilt widget app. Install the widget from source with Xcode instead.
 
 ---
 
