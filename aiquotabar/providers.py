@@ -96,7 +96,7 @@ def _get(url: str, cookies: dict) -> dict | list:
         url, cookies=_strip_cf_cookies(cookies), headers=HEADERS, timeout=15,
         impersonate=_IMPERSONATE,
     )
-    log.debug("GET %s  status=%s  body=%s", url, r.status_code, r.text[:800])
+    log.debug("GET %s status=%s", url, r.status_code)
     r.raise_for_status()
     return r.json()
 
@@ -152,7 +152,7 @@ def fetch_raw(cookie_str: str) -> dict:
     usage = _get(
         f"https://claude.ai/api/organizations/{org_id}/usage", cookies
     )
-    log.debug("usage full response: %s", json.dumps(usage, indent=2))
+    log.debug("claude usage fetched for org=%s keys=%s", org_id, list(usage.keys()))
     return {"usage": usage, "org_id": org_id}
 
 
@@ -263,7 +263,7 @@ def _parse_wham_usage(data: dict) -> ProviderData:
       rate_limit.primary_window.reset_at      (Unix timestamp)
       code_review_rate_limit  -- same structure
     """
-    log.debug("wham/usage raw: %s", json.dumps(data, indent=2))
+    log.debug("chatgpt usage fetched keys=%s", list(data.keys()))
 
     rows: list[LimitRow] = []
 
@@ -378,7 +378,7 @@ def fetch_copilot(cookie_str: str) -> ProviderData:
         )
         r.raise_for_status()
         data = r.json()
-        log.debug("copilot_usage_card: %s", json.dumps(data, indent=2))
+        log.debug("copilot usage fetched keys=%s", list(data.keys()))
         used = float(data.get("discountQuantity", 0))
         limit = float(data.get("userPremiumRequestEntitlement", 0))
         return ProviderData(
@@ -406,7 +406,7 @@ def fetch_cursor(cookie_str: str) -> ProviderData:
         )
         r.raise_for_status()
         data = r.json()
-        log.debug("cursor usage-summary: %s", json.dumps(data, indent=2))
+        log.debug("cursor usage fetched keys=%s", list(data.keys()))
         plan = (data.get("individualUsage") or {}).get("plan") or {}
         auto_pct = int(round(float(plan.get("autoPercentUsed", 0))))
         api_pct = int(round(float(plan.get("apiPercentUsed", 0))))
@@ -568,8 +568,11 @@ def _run_cookie_detection(domain: str, target_cookie: str) -> str | None:
             [sys.executable, "-c", _DETECT_SCRIPT, domain, target_cookie],
             capture_output=True, text=True, timeout=60,
         )
-        log.debug("cookie-detect rc=%d out=%r err=%r",
-                  r.returncode, r.stdout[:200], r.stderr[:200])
+        has_result = bool(r.stdout.strip())
+        log.debug(
+            "cookie-detect domain=%s target=%s rc=%d found=%s",
+            domain, target_cookie, r.returncode, has_result,
+        )
         if r.stdout.strip():
             return json.loads(r.stdout.strip())
     except Exception as e:

@@ -1,19 +1,36 @@
 """Configuration constants and persistence."""
 
+import glob
 import json
-import os
 import logging
 import logging.handlers
+import os
 
 # ── logging ──────────────────────────────────────────────────────────────────
 
-LOG_FILE = os.path.expanduser("~/.claude_bar.log")
-_log_handler = logging.handlers.RotatingFileHandler(
-    LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3,
-)
-_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-logging.basicConfig(handlers=[_log_handler], level=logging.DEBUG)
 log = logging.getLogger("aiquotabar")
+LOG_FILE = os.path.expanduser("~/.claude_bar.log")
+LOG_PURGE_MARKER = "log_cleanup_v1_done"
+
+
+def _make_log_handler() -> logging.Handler:
+    handler = logging.handlers.RotatingFileHandler(
+        LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3,
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    )
+    return handler
+
+
+def _configure_logging():
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(_make_log_handler())
+    root.setLevel(logging.DEBUG)
+
+
+_configure_logging()
 
 # ── paths & thresholds ───────────────────────────────────────────────────────
 
@@ -91,6 +108,32 @@ def save_config(cfg: dict):
     with open(tmp, "w") as f:
         json.dump(cfg, f, indent=2)
     os.replace(tmp, CONFIG_FILE)
+
+
+def purge_compromised_logs_once(cfg: dict):
+    """Delete old log files once, then recreate a fresh handler."""
+    if cfg.get(LOG_PURGE_MARKER):
+        return
+
+    root = logging.getLogger()
+    old_handlers = list(root.handlers)
+    for handler in old_handlers:
+        try:
+            handler.flush()
+            handler.close()
+        except Exception:
+            pass
+        root.removeHandler(handler)
+
+    for path in glob.glob(LOG_FILE + "*"):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    _configure_logging()
+    cfg[LOG_PURGE_MARKER] = True
+    save_config(cfg)
 
 
 def notif_enabled(cfg: dict, key: str) -> bool:

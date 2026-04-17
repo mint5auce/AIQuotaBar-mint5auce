@@ -13,7 +13,7 @@ import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 from aiquotabar.config import (
-    log, load_config, save_config, notif_enabled, set_notif,
+    log, load_config, save_config, notif_enabled, purge_compromised_logs_once, set_notif,
     REFRESH_INTERVALS, DEFAULT_REFRESH,
     WARN_THRESHOLD, CRIT_THRESHOLD, PACING_ALERT_MINUTES,
     HISTORY_COLORS,
@@ -1913,6 +1913,7 @@ class ClaudeBar(rumps.App):
     def __init__(self):
         super().__init__("\u25c6", quit_button=None)
         self.config = load_config()
+        purge_compromised_logs_once(self.config)
         self._last_raw: dict = {}
         self._last_data: UsageData | None = None
         self._provider_data: list[ProviderData] = []
