@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """UI components -- menu bar app, floating panel, windows."""
 
 import rumps
@@ -17,7 +19,6 @@ from aiquotabar.config import (
     REFRESH_INTERVALS, DEFAULT_REFRESH,
     WARN_THRESHOLD, CRIT_THRESHOLD, PACING_ALERT_MINUTES,
     HISTORY_COLORS,
-    WIDGET_CACHE_DIR,
 )
 from aiquotabar.providers import (
     LimitRow, UsageData, ProviderData, parse_usage, fetch_raw,
@@ -39,9 +40,6 @@ from aiquotabar.history import (
     _get_week_limit_hits, _get_today_stats,
     _fetch_history_data, _nscolor,
 )
-from aiquotabar.widget import _write_widget_cache, _is_widget_installed
-
-
 # -- Brand icon helpers --------------------------------------------------------
 
 _ICON_DIR   = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
@@ -148,8 +146,8 @@ except Exception:
 
 # -- Welcome window ------------------------------------------------------------
 
-def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
-    """Show a native macOS welcome window with side-by-side GIFs."""
+def _show_welcome_window() -> None:
+    """Show a native macOS welcome window with a product demo."""
     from AppKit import (
         NSWindow, NSImageView, NSImage, NSTextField, NSButton, NSFont,
         NSMakeRect, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
@@ -162,28 +160,18 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     import Quartz
 
     PAD = 24
-    GAP = 16
+    GAP = 0
 
-    # Load both GIFs
+    # Load the main demo GIF.
     assets_dir = _ICON_DIR
     demo_img = NSImage.alloc().initWithContentsOfFile_(
         os.path.join(assets_dir, "demo.gif")
     )
-    widget_img = NSImage.alloc().initWithContentsOfFile_(gif_path)
-
-    # Both GIFs at same height; widths from aspect ratios
     GIF_H = 480
-    def _w_for_h(img, h):
-        if not img:
-            return 200
-        iw, ih = img.size().width, img.size().height
-        return int(h * iw / ih) if ih > 0 else 200
 
-    # Left GIF: fixed wider width, fill-scaled (crops top/bottom)
     demo_w = 320
-    widget_w = _w_for_h(widget_img, GIF_H)
-    WIN_W = PAD + demo_w + GAP + widget_w + PAD
-    WIN_H = 70 + GIF_H + 20 + 150 + 54  # header + gifs + labels + info + button
+    WIN_W = PAD + demo_w + GAP + PAD
+    WIN_H = 70 + GIF_H + 20 + 120 + 54  # header + gif + label + info + button
 
     # Centre on screen
     screen = NSScreen.mainScreen().frame()
@@ -277,27 +265,21 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     _label("Monitor your Claude and ChatGPT usage limits in real time.",
            PAD, y_top - 22, WIN_W - PAD * 2, size=12)
 
-    # -- Side-by-side GIFs --
+    # -- Demo GIF --
     gif_y = y_top - 22 - 14 - GIF_H
     _make_gif(demo_img, PAD, gif_y, demo_w, GIF_H, fill=True)
-    _label("Menu Bar", PAD, gif_y - 16, demo_w)
-
-    widget_x = PAD + demo_w + GAP
-    _make_gif(widget_img, widget_x, gif_y, widget_w, GIF_H)
-    _label("Desktop Widget", widget_x, gif_y - 16, widget_w)
+    _label("Menu Bar App", PAD, gif_y - 16, demo_w)
 
     # -- Info rows --
     info_y = gif_y - 40
     inner_w = WIN_W - PAD * 2
     rows = [
-        ("Menu Bar",
+        ("Menu Bar App",
          "Click the diamond icon to see session limits, weekly caps, and reset times."),
-        ("Desktop Widget",
-         "Installed and synced. Right-click desktop > Edit Widgets > 'AI Quota'."
-         if widget_installed else
-         "Available to install. Check 'Desktop Widget' in the menu bar."),
         ("Auto Refresh",
          "Data updates every 60 seconds. Alerts at 80% and 95% usage."),
+        ("Privacy",
+         "Runs locally in your menu bar and uses your existing browser sessions."),
     ]
     for heading, desc in rows:
         h = NSTextField.alloc().initWithFrame_(
@@ -2295,19 +2277,6 @@ class ClaudeBar(rumps.App):
         login_item._menuitem.setState_(1 if self._is_login_item_cached() else 0)
         items.append(login_item)
 
-        # Desktop Widget status
-        if _is_widget_installed():
-            widget_item = rumps.MenuItem(
-                "Desktop Widget  \u2713  Installed",
-                callback=self._open_widget_settings,
-            )
-        else:
-            widget_item = rumps.MenuItem(
-                "Desktop Widget  \u00b7  Not Installed",
-                callback=self._install_widget_prompt,
-            )
-        items.append(widget_item)
-
         items.append(None)
         items.append(rumps.MenuItem("Quit", callback=rumps.quit_application))
 
@@ -2345,13 +2314,13 @@ class ClaudeBar(rumps.App):
         elif title is not None:
             self.title = title
 
-    # -- widget ---------------------------------------------------------------
+    # -- startup --------------------------------------------------------------
 
     def _deferred_welcome(self, _timer):
         """Runs once after the run loop is active, then stops itself."""
         _timer.stop()
         self._hook_status_button()
-        self._check_widget_status()
+        self._show_startup_status()
         if self._pending_secret_migration_failures:
             self._notify_secret_store_error("Could not migrate saved credentials to Keychain")
             self._pending_secret_migration_failures = []
@@ -2433,16 +2402,15 @@ class ClaudeBar(rumps.App):
             log.debug("_get_settings_menu failed", exc_info=True)
             return None
 
-    def _check_widget_status(self):
+    def _show_startup_status(self):
         """Show startup info about what the app is doing."""
         seen_welcome = self.config.get("seen_welcome", False)
-        widget_ok = _is_widget_installed()
 
         if not seen_welcome:
             # First launch -- show native welcome window with GIF
-            gif_path = os.path.join(_ICON_DIR, "widget_info.gif")
+            gif_path = os.path.join(_ICON_DIR, "demo.gif")
             if os.path.isfile(gif_path):
-                _show_welcome_window(gif_path, widget_ok)
+                _show_welcome_window()
             else:
                 # Fallback to notification if GIF missing
                 rumps.notification(
@@ -2455,57 +2423,12 @@ class ClaudeBar(rumps.App):
             save_config(self.config)
         else:
             # Subsequent launches -- brief notification
-            if widget_ok:
-                rumps.notification(
-                    title="AIQuotaBar",
-                    subtitle="Running",
-                    message="Menu bar and desktop widget are synced.",
-                    sound=False,
-                )
-            else:
-                rumps.notification(
-                    title="AIQuotaBar",
-                    subtitle="Running",
-                    message=(
-                        "Tracking usage from your menu bar. "
-                        "A desktop widget is also available \u2014 check the menu."
-                    ),
-                    sound=False,
-                )
-
-    def _open_widget_settings(self, _sender):
-        """Open the widget host app (shows add-widget instructions)."""
-        subprocess.Popen(
-            ["open", "-a", "AIQuotaBarHost"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-
-    def _install_widget_prompt(self, _sender):
-        """Show instructions for building/installing the widget."""
-        widget_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "AIQuotaBarWidget"
-        )
-        if os.path.isdir(widget_dir):
-            build_script = os.path.join(widget_dir, "build_widget.sh")
-            if os.path.isfile(build_script):
-                rumps.alert(
-                    title="Install Desktop Widget",
-                    message=(
-                        "To install the desktop widget, run in Terminal:\n\n"
-                        f"cd {widget_dir}\n"
-                        "./build_widget.sh\n\n"
-                        "Then right-click desktop \u2192 Edit Widgets \u2192 search 'AI Quota'."
-                    ),
-                )
-                return
-        rumps.alert(
-            title="Desktop Widget Not Found",
-            message=(
-                "The widget project was not found.\n\n"
-                "Make sure the AIQuotaBarWidget folder exists "
-                "in the AIQuotaBar directory."
-            ),
-        )
+            rumps.notification(
+                title="AIQuotaBar",
+                subtitle="Running",
+                message="Tracking usage from your menu bar.",
+                sound=False,
+            )
 
     # -- fetch ----------------------------------------------------------------
 
@@ -2599,8 +2522,6 @@ class ClaudeBar(rumps.App):
             self._check_pacing_alerts()
 
             self._post_data(data)          # <- main thread applies title + menu
-            _write_widget_cache(data, self._provider_data, self._cc_stats, self.config)
-
         except CurlHTTPError as e:
             resp = getattr(e, "response", None)
             code = getattr(resp, "status_code", 0) or 0

@@ -94,31 +94,6 @@ sleep 1
 launchctl bootstrap gui/$(id -u) "$PLIST"
 echo "  ✓  Added to Login Items (runs at every login)"
 
-# ── 5b. Desktop Widget ───────────────────────────────────────────────────────
-WIDGET_APP="/Applications/AIQuotaBarHost.app"
-WIDGET_INSTALLED=false
-
-if [ -d "$WIDGET_APP" ]; then
-    echo "  ✓  Desktop widget already installed"
-    WIDGET_INSTALLED=true
-elif command -v xcodebuild &>/dev/null && [ -d "$INSTALL_DIR/AIQuotaBarWidget/AIQuotaBarWidget.xcodeproj" ]; then
-    echo "  ↓  Building desktop widget (Xcode found)…"
-    if bash "$INSTALL_DIR/AIQuotaBarWidget/build_widget.sh"; then
-        WIDGET_INSTALLED=true
-    else
-        echo "  ⚠  Widget build failed (non-fatal)"
-    fi
-else
-    echo "  ⊘  Widget: skipped (Xcode not found)"
-    echo "     Build it later from source with:"
-    echo "       cd \"$INSTALL_DIR/AIQuotaBarWidget\" && ./build_widget.sh"
-fi
-
-if [ "$WIDGET_INSTALLED" = true ]; then
-    echo "     Right-click desktop → Edit Widgets → search \"AI Quota\""
-fi
-echo ""
-
 # ── 6. Launch now ─────────────────────────────────────────────────────────────
 pkill -f "$INSTALL_DIR/claude_bar.py" 2>/dev/null || true
 sleep 1

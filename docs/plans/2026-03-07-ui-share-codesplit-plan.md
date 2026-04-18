@@ -51,12 +51,6 @@ DEFAULT_REFRESH = 300
 WARN_THRESHOLD = 80
 CRIT_THRESHOLD = 95
 
-WIDGET_HOST_APP = "/Applications/AIQuotaBarHost.app"
-WIDGET_CACHE_DIR = os.path.expanduser(
-    "~/Library/Application Support/AIQuotaBar"
-)
-WIDGET_CACHE_FILE = os.path.join(WIDGET_CACHE_DIR, "usage.json")
-
 # Notification defaults
 NOTIF_DEFAULTS = {
     "claude_reset":   True,
@@ -239,24 +233,12 @@ git commit -m "refactor: extract history.py — burn rate, sparklines, SQLite tr
 
 ---
 
-### Task 4: Extract `widget.py` and `update.py`
+### Task 4: Extract `update.py`
 
 **Files:**
-- Create: `aiquotabar/widget.py`
 - Create: `aiquotabar/update.py`
 
-**Step 1: Create `aiquotabar/widget.py`**
-
-Extract from `claude_bar.py`:
-- Lines 1147-1268: `_write_widget_cache`, `_is_widget_installed`
-
-Imports:
-```python
-from aiquotabar.config import log, WIDGET_HOST_APP, WIDGET_CACHE_DIR, WIDGET_CACHE_FILE
-from aiquotabar.providers import LimitRow, UsageData, ProviderData
-```
-
-**Step 2: Create `aiquotabar/update.py`**
+**Step 1: Create `aiquotabar/update.py`**
 
 Extract from `claude_bar.py`:
 - Lines 535-572: `_check_and_apply_update`, `_restart_app`
@@ -266,18 +248,18 @@ Imports:
 from aiquotabar.config import log
 ```
 
-**Step 3: Verify both import**
+**Step 2: Verify the import**
 
 ```bash
-python3 -c "from aiquotabar.widget import _write_widget_cache; from aiquotabar.update import _check_and_apply_update; print('OK')"
+python3 -c "from aiquotabar.update import _check_and_apply_update; print('OK')"
 ```
 Expected: `OK`
 
-**Step 4: Commit**
+**Step 3: Commit**
 
 ```bash
-git add aiquotabar/widget.py aiquotabar/update.py
-git commit -m "refactor: extract widget.py and update.py"
+git add aiquotabar/update.py
+git commit -m "refactor: extract update.py"
 ```
 
 ---
@@ -320,7 +302,6 @@ from aiquotabar.history import (
     _get_week_limit_hits, _get_today_stats,
     _show_history_window,
 )
-from aiquotabar.widget import _write_widget_cache, _is_widget_installed
 from aiquotabar.update import _check_and_apply_update, _restart_app
 ```
 
@@ -403,7 +384,7 @@ git add aiquotabar/__main__.py claude_bar.py
 git commit -m "refactor: complete code split — claude_bar.py is now a shim
 
 The 3545-line single file is split into 6 modules:
-  config.py, providers.py, history.py, widget.py, update.py, ui.py
+  config.py, providers.py, history.py, update.py, ui.py
 claude_bar.py remains as a thin shim for backwards compatibility."
 ```
 
@@ -682,7 +663,6 @@ The gear icon in the panel header opens a popover (or secondary panel) containin
 - Auto-detect from Browser
 - Set Session Cookie...
 - Launch at Login toggle
-- Desktop Widget status
 - Show Raw API Data
 - Quit
 
@@ -706,7 +686,7 @@ class _SettingsPopover:
         # Status bar providers group
         # API providers group
         # Actions group (auto-detect, set cookie, raw data)
-        # Footer (launch at login, widget, quit)
+        # Footer (launch at login, quit)
         ...
 ```
 
@@ -900,7 +880,7 @@ share (copy image + X), and code split into 6 modules."
 | 1 | config.py | ~100 lines |
 | 2 | providers.py | ~700 lines |
 | 3 | history.py | ~450 lines |
-| 4 | widget.py + update.py | ~170 lines |
+| 4 | update.py | ~35 lines |
 | 5 | ui.py (migrate existing) | ~1500 lines |
 | 6 | Shim + __main__.py | ~20 lines |
 | 7 | Floating panel (_UsagePanel) | ~300 lines new |

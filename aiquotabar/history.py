@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Usage history tracking -- burn rate, sparklines, SQLite persistence."""
 
 import json

@@ -97,7 +97,6 @@ aiquotabar/
   providers.py             # Data models, all fetch functions, cookie detection, parsing
   history.py               # Usage history, burn rate, SQLite, sparklines
   ui.py                    # ClaudeBar(rumps.App), floating panel, share, settings, windows
-  widget.py                # Widget cache writer, widget helpers
   update.py                # Auto-update logic
 ```
 
@@ -106,7 +105,7 @@ aiquotabar/
 ```
 config  <-  providers  <-  history  <-  ui  <-  __main__
                                         ^
-                                   widget, update
+                                   update
 ```
 
 ### Migration

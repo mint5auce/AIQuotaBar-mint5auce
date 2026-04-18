@@ -6,7 +6,7 @@ No Electron. No browser extension. One command to install.
 
 ## Security Hardening
 
-This fork keeps the original AIQuotaBar concept by Toprak Yagcioglu, but removes several risky behaviors from the upstream version: background self-update, logging of detected cookies, plaintext secret storage, broad cookie collection, and the installer path that downloaded and auto-launched a prebuilt widget app. See the full [security review](security_best_practices_report.md).
+This fork keeps the original AIQuotaBar concept by Toprak Yagcioglu, but removes several risky behaviors from the upstream version: background self-update, logging of detected cookies, plaintext secret storage, and broad cookie collection. See the full [security review](security_best_practices_report.md).
 
 
 ---
@@ -87,33 +87,10 @@ CURSOR
 
 ---
 
-## Desktop Widget (NEW)
-
-Native macOS WidgetKit widget — see your AI usage right on your desktop or in Notification Center.
-
-**Small widget:** Claude + ChatGPT percentages at a glance, color-coded by brand.
-
-**Medium widget:** Side-by-side breakdown with session limits, weekly caps, progress bars, and reset times.
-
-The widget syncs automatically with the menu bar app — no extra setup after you build and install it locally. Data updates every 60 seconds.
-
-```bash
-# Build the widget (requires Xcode)
-cd AIQuotaBarWidget && ./build_widget.sh
-# Then: right-click desktop → Edit Widgets → search "AI Quota"
-```
-
-> The widget is entirely optional — the menu bar app works without it. Requires macOS 14+ and Xcode 15+.
-
-> For security, the one-line installer does not download or auto-launch a prebuilt widget app. Install the widget from source with Xcode instead.
-
----
-
 ## Features
 
 - **Zero-setup auth for Claude** — reads the minimum Claude cookies it needs from your browser (Chrome, Arc, Brave, Edge, Firefox, Safari)
 - **Claude + ChatGPT + Cursor + Copilot** — tracks Claude.ai session/weekly limits, ChatGPT rate limits, Cursor Auto/API usage, and GitHub Copilot premium requests — all in one place
-- **Desktop widget** — native macOS WidgetKit widget with brand-colored progress bars
 - **Multi-provider** — add OpenAI, MiniMax, GLM (Zhipu) API keys to see spending alongside usage
 - **Burn rate + ETA** — predicts when you'll hit each limit based on your current pace
 - **Pacing alerts** — notifies you when you're on track to hit a limit within 30 minutes
@@ -129,10 +106,9 @@ cd AIQuotaBarWidget && ./build_widget.sh
 
 | | AIQuotaBar | Open settings page | Browser extension |
 |---|---|---|---|
-| Always visible | ✅ Menu bar + desktop widget | ❌ Manual tab switch | ⚠️ Badge only |
+| Always visible | ✅ Menu bar | ❌ Manual tab switch | ⚠️ Badge only |
 | Notifications | ✅ 80% + 95% + pacing alerts | ❌ None | ⚠️ Varies |
 | Claude + ChatGPT + Cursor + Copilot | ✅ All in one place | ❌ One at a time | ❌ |
-| Desktop widget | ✅ Native WidgetKit | ❌ | ❌ |
 | Privacy | ✅ Local only | ✅ | ⚠️ Depends on extension |
 | Install | ✅ One command | ✅ Nothing | ❌ Store + permissions |
 | No Electron | ✅ Single-file Python | ✅ | ❌ Often Electron |
@@ -203,7 +179,6 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 ## Roadmap
 
 - [x] Homebrew tap (`brew tap yagcioglutoprak/aiquotabar && brew install --HEAD aiquotabar`)
-- [x] Native macOS desktop widget (WidgetKit)
 - [x] Cursor IDE usage tracking (Auto + API)
 - [x] GitHub Copilot premium request tracking
 - [x] Burn rate ETA + pacing alerts

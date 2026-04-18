@@ -56,18 +56,6 @@ claude_bar.py
 └── App            ClaudeBar(rumps.App) — timer, menu rebuild, callbacks
 ```
 
-## Widget (optional)
-
-A native macOS WidgetKit widget in `AIQuotaBarWidget/` shows usage on the desktop.
-
-**Data flow:** `claude_bar.py` → `~/Library/Application Support/AIQuotaBar/usage.json` → WidgetKit reads it.
-
-- `_write_widget_cache()` runs after every fetch cycle (atomic write, never crashes main app)
-- Widget refreshes every 15 min via `TimelineProvider`
-- Shows stale indicator if data is >30 min old
-- Small widget: circular gauge (Claude session %). Medium: side-by-side bars
-- Requires Xcode 15+ to build; entirely optional — menu bar app works without it
-
 ## Adding a new provider
 
 1. Write `fetch_myprovider(api_key: str) -> ProviderData` — return `ProviderData` with `spent`/`limit` or `balance`
@@ -111,7 +99,6 @@ Response fields:
 | `requirements.txt` | `rumps`, `curl_cffi`, `browser-cookie3`           |
 | `setup.sh`      | Legacy manual installer (kept for reference)         |
 | `assets/`       | demo.gif and screenshots for README                  |
-| `AIQuotaBarWidget/` | Optional WidgetKit desktop widget (Xcode project)   |
 
 ## Growth / virality rules
 
@@ -141,7 +128,7 @@ These features would make the app significantly more shareable:
 3. **Usage history chart** — "see your AI usage over time" is a compelling screenshot
 4. **Share/export** — one-click screenshot of usage to clipboard (instant Twitter content)
 5. **Claude Code / CLI tracking** — devs using Claude Code want to see limits too
-6. **Notification Center widget** — already have WidgetKit, expose in NC for more visibility
+6. **Smarter notifications** — richer reset, pacing, and provider-specific alerts for better visibility
 
 ## Dev workflow
 

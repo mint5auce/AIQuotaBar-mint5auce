@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Data models and API fetch functions for all providers."""
 
 import json

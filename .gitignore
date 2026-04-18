@@ -34,11 +34,5 @@ Icon?
 *.swp
 *.swo
 
-# Xcode build artifacts
-AIQuotaBarWidget/build/
-AIQuotaBarWidget/build_*/
-xcuserdata/
-*.xcuserstate
-
 # Distribution archives
 *.zip

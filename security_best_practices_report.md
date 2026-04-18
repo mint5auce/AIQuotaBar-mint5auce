@@ -4,7 +4,7 @@ Reviewed on 2026-04-17.
 
 ## Executive Summary
 
-I did not find evidence of hidden telemetry, arbitrary outbound exfiltration endpoints, or widget code that reads browser cookies directly. The core app does read browser cookies locally and uses them to call the expected provider endpoints.
+I did not find evidence of hidden telemetry or arbitrary outbound exfiltration endpoints. The core app does read browser cookies locally and uses them to call the expected provider endpoints.
 
 I did find several significant security issues around how those cookies and other secrets are handled after collection:
 
@@ -12,8 +12,6 @@ I did find several significant security issues around how those cookies and othe
 2. Full browser session cookies and API keys are persisted in plaintext outside the browser keychain.
 3. The app copies broader cookie sets than necessary, including entire domain cookie jars.
 4. The default git-based install path enables silent remote code updates and dependency refreshes.
-5. The installer downloads and launches a prebuilt widget after stripping macOS quarantine.
-
 Together, these issues mean the app does more than "read cookies for usage checks": it also retains, logs, and auto-updates code using trust paths that are not hardened.
 
 ## Scope Reviewed
@@ -21,7 +19,6 @@ Together, these issues mean the app does more than "read cookies for usage check
 - Python app under `aiquotabar/`
 - Entry point `claude_bar.py`
 - Installers: `install.sh`, `setup.sh`, `Formula/aiquotabar.rb`
-- Optional WidgetKit app under `AIQuotaBarWidget/`
 - Dependency manifest `requirements.txt`
 
 ## Critical Findings
@@ -116,30 +113,9 @@ Recommendation:
 - If update support is kept, require explicit user confirmation and update only to signed/tagged releases.
 - Pin and verify dependency artifacts instead of live `pip install -r requirements.txt` from the network.
 
-### F-05: The installer downloads a prebuilt widget, strips quarantine, and launches it
-
-Impact: a compromised GitHub release asset or network path can result in execution of an unverified application bundle with macOS protections intentionally bypassed.
-
-Evidence:
-
-- `install.sh:112-123` downloads `AIQuotaBarWidget.zip` from GitHub releases.
-- `install.sh:118` removes `com.apple.quarantine`.
-- `install.sh:121-123` launches the downloaded app immediately.
-
-Why this matters:
-
-- Stripping quarantine prevents Gatekeeper from providing its normal protection for a downloaded app.
-- There is no checksum or signature verification step before launch.
-
-Recommendation:
-
-- Do not clear quarantine automatically.
-- Verify a pinned checksum or a Developer ID signature before installation.
-- Prefer building locally from source when Xcode is available.
-
 ## Medium Findings
 
-### F-06: `curl_cffi` is currently on a version with a published high-severity advisory
+### F-05: `curl_cffi` is currently on a version with a published high-severity advisory
 
 Impact: the dependency has a current SSRF advisory; exploitability in this app is limited because the app uses hard-coded URLs, but the dependency should still be updated.
 
@@ -162,10 +138,9 @@ Recommendation:
 
 - No evidence of analytics, telemetry beacons, advertising SDKs, or arbitrary exfiltration endpoints in the app code.
 - Runtime network destinations in the Python app are hard-coded provider endpoints plus GitHub/X for user actions and updates.
-- The WidgetKit extension appears sandboxed and reads only `~/Library/Application Support/AIQuotaBar/usage.json`; it does not read browser cookies directly.
 
 ## Overall Assessment
 
 The app is not behaving like a cookie stealer in the classic sense: I did not find code that ships cookies to unrelated servers or hidden collectors. However, it is not currently safe enough to claim it uses browser cookies only for the narrow stated need. The biggest problems are local secret handling and software supply-chain behavior after the cookies have been copied.
 
-Before treating this app as safe for regular use, I would fix F-01 through F-05 first.
+Before treating this app as safe for regular use, I would fix F-01 through F-04 first.

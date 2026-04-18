@@ -46,12 +46,6 @@ DEFAULT_REFRESH = 300
 WARN_THRESHOLD = 80   # notify when any limit crosses this %
 CRIT_THRESHOLD = 95   # title turns red emoji above this %
 
-WIDGET_HOST_APP = "/Applications/AIQuotaBarHost.app"
-WIDGET_CACHE_DIR = os.path.expanduser(
-    "~/Library/Application Support/AIQuotaBar"
-)
-WIDGET_CACHE_FILE = os.path.join(WIDGET_CACHE_DIR, "usage.json")
-
 # ── notification defaults ─────────────────────────────────────────────────────
 # Keys stored in config under "notifications": { key: bool }
 NOTIF_DEFAULTS = {
