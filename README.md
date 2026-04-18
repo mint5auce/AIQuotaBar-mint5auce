@@ -4,17 +4,10 @@
 
 No Electron. No browser extension. One command to install.
 
-<p align="center">
-<img src="assets/demo.gif" alt="Menu Bar" width="380">
-</p>
-<p align="center">
-<img src="assets/widget_info.gif" alt="Desktop Widget" width="600">
-</p>
+## Security Hardening
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/yagcioglutoprak/AIQuotaBar?style=social)](https://github.com/yagcioglutoprak/AIQuotaBar/stargazers)
-[![Downloads](https://img.shields.io/github/downloads/yagcioglutoprak/AIQuotaBar/total)](https://github.com/yagcioglutoprak/AIQuotaBar/releases)
-[![Latest Release](https://img.shields.io/github/v/release/yagcioglutoprak/AIQuotaBar)](https://github.com/yagcioglutoprak/AIQuotaBar/releases/latest)
+This fork keeps the original AIQuotaBar concept by Toprak Yagcioglu, but removes several risky behaviors from the upstream version: background self-update, logging of detected cookies, plaintext secret storage, broad cookie collection, and the installer path that downloaded and auto-launched a prebuilt widget app. See the full [security review](security_best_practices_report.md).
+
 
 ---
 
