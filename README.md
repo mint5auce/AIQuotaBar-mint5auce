@@ -130,7 +130,7 @@ CURSOR
 git clone https://github.com/yagcioglutoprak/AIQuotaBar.git
 cd AIQuotaBar
 pip install -r requirements.txt
-python3 aiquotabar.py
+python3 -m aiquotabar
 ```
 
 To upgrade later, rerun the install command, update via Homebrew, or pull the repo manually and reinstall dependencies.

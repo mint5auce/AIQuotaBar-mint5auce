@@ -102,7 +102,7 @@ class Aiquotabar < Formula
       end
     end
 
-    libexec.install "aiquotabar.py"
+    libexec.install "aiquotabar"
     (libexec/"assets").install Dir["assets/*"]
 
     # Fix rumps notification crash (requires CFBundleIdentifier in Info.plist)
@@ -114,7 +114,8 @@ class Aiquotabar < Formula
 
     (bin/"aiquotabar").write <<~SH
       #!/bin/bash
-      exec "#{venv}/bin/python" "#{libexec}/aiquotabar.py" "$@"
+      cd "#{libexec}" || exit 1
+      exec "#{venv}/bin/python" -m aiquotabar "$@"
     SH
     chmod 0755, bin/"aiquotabar"
   end
@@ -131,6 +132,6 @@ class Aiquotabar < Formula
   end
 
   test do
-    system "#{libexec}/venv/bin/python", "-m", "py_compile", "#{libexec}/aiquotabar.py"
+    system "#{libexec}/venv/bin/python", "-m", "py_compile", "#{libexec}/aiquotabar/__main__.py"
   end
 end

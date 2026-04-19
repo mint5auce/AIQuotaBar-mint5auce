@@ -884,8 +884,8 @@ def _section_header_mi(title: str, icon_filename: str | None,
 
 # -- login item helpers --------------------------------------------------------
 
-def _script_path() -> str:
-    return os.path.abspath(sys.argv[0])
+def _module_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _is_login_item() -> bool:
@@ -902,12 +902,13 @@ def _is_login_item() -> bool:
 
 def _add_login_item():
     import plistlib
-    path = _script_path()
+    root = _module_root()
     plist = os.path.expanduser("~/Library/LaunchAgents/com.aiquotabar.plist")
     python_exe = sys.executable
     plist_data = {
         "Label": "com.aiquotabar",
-        "ProgramArguments": [python_exe, path],
+        "ProgramArguments": [python_exe, "-m", "aiquotabar"],
+        "WorkingDirectory": root,
         "RunAtLoad": True,
         "KeepAlive": False,
     }

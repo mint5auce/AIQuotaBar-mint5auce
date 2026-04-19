@@ -15,7 +15,7 @@
 **Files:**
 - Create: `aiquotabar/__init__.py`
 - Create: `aiquotabar/config.py`
-- Modify: `aiquotabar.py` (will become shim at end, but keep working for now)
+- Modify: package entrypoint files as needed during extraction
 
 **Step 1: Create the package directory**
 
@@ -31,7 +31,7 @@ Empty file:
 
 **Step 3: Create `aiquotabar/config.py`**
 
-Extract from `aiquotabar.py` lines 40-96 (constants) and lines 500-532 (config functions):
+Extract from the original monolith's constants and config functions:
 
 ```python
 """Configuration constants and persistence."""
@@ -142,7 +142,7 @@ Expected: `OK`
 
 ```bash
 git add aiquotabar/__init__.py aiquotabar/config.py
-git commit -m "refactor: extract config.py module from aiquotabar.py"
+git commit -m "refactor: extract config.py module from monolith"
 ```
 
 ---
@@ -154,7 +154,7 @@ git commit -m "refactor: extract config.py module from aiquotabar.py"
 
 **Step 1: Create `aiquotabar/providers.py`**
 
-Extract from `aiquotabar.py`:
+Extract from the original monolith:
 - Lines 575-610: `LimitRow`, `UsageData`, `ProviderData` dataclasses
 - Lines 612-935: All fetch functions, cookie detection, parsing
 - Lines 940-972: `_fmt_reset` time helper
@@ -202,7 +202,7 @@ git commit -m "refactor: extract providers.py — all fetch functions and data m
 
 **Step 1: Create `aiquotabar/history.py`**
 
-Extract from `aiquotabar.py`:
+Extract from the original monolith:
 - Lines 104-109: `_nscolor` helper
 - Lines 112-244: JSON history functions (`_load_history`, `_save_history`, `_append_history`, `_calc_burn_rate`, `_calc_eta_minutes`, `_fmt_eta`, `_sparkline`)
 - Lines 247-497: SQLite history functions (`_init_history_db`, `_record_sample`, `_rollup_daily_stats`, `_get_weekly_stats`, `_get_week_limit_hits`, `_weekly_sparkline`, `_get_today_stats`, `_fetch_history_data`)
@@ -240,7 +240,7 @@ git commit -m "refactor: extract history.py — burn rate, sparklines, SQLite tr
 
 **Step 1: Create `aiquotabar/update.py`**
 
-Extract from `aiquotabar.py`:
+Extract from the original monolith:
 - Lines 535-572: `_check_and_apply_update`, `_restart_app`
 
 Imports:
@@ -271,7 +271,7 @@ git commit -m "refactor: extract update.py"
 
 **Step 1: Create `aiquotabar/ui.py`**
 
-Move the remaining code from `aiquotabar.py`:
+Move the remaining code from the original monolith:
 - Lines 1009-1110: Icon helpers, `_BarToggleView`
 - Lines 1271-1464: Welcome window (`_show_welcome_window`)
 - Lines 1467-1883: History window (`_show_history_window`)
@@ -323,11 +323,11 @@ git commit -m "refactor: extract ui.py — AIQuotaBarApp class and all UI compon
 
 ---
 
-### Task 6: Wire up `__main__.py` and convert `aiquotabar.py` to shim
+### Task 6: Wire up `__main__.py` as the canonical entrypoint
 
 **Files:**
 - Create: `aiquotabar/__main__.py`
-- Modify: `aiquotabar.py` (replace 3545 lines with 8-line shim)
+- Remove the need for a top-level script shim
 
 **Step 1: Create `aiquotabar/__main__.py`**
 
@@ -350,41 +350,19 @@ if __name__ == "__main__":
     main()
 ```
 
-**Step 2: Replace `aiquotabar.py` with a shim**
-
-```python
-#!/usr/bin/env python3
-"""AI Quota Bar entry point.
-
-The real code lives in the aiquotabar/ package.
-
-"""
-from aiquotabar.__main__ import main
-
-if __name__ == "__main__":
-    main()
-```
-
-**Step 3: Verify the app launches both ways**
+**Step 2: Verify the package entrypoint**
 
 ```bash
-python3 aiquotabar.py --history 2>/dev/null; echo "shim OK"
 python3 -m aiquotabar --history 2>/dev/null; echo "package OK"
 ```
 
-**Step 4: Verify install.sh still references `aiquotabar.py` correctly**
-
-The plist in `install.sh` line 78 points to `$INSTALL_DIR/aiquotabar.py` — this still works because the shim imports from the package. No changes needed.
+**Step 3: Verify install.sh and wrappers invoke `python3 -m aiquotabar`**
 
 **Step 5: Commit**
 
 ```bash
-git add aiquotabar/__main__.py aiquotabar.py
-git commit -m "refactor: complete code split — aiquotabar.py is now a shim
-
-The 3545-line single file is split into 6 modules:
-  config.py, providers.py, history.py, update.py, ui.py
-aiquotabar.py remains as a thin shim for backwards compatibility."
+git add aiquotabar/__main__.py
+git commit -m "refactor: complete code split — package entrypoint via python -m aiquotabar"
 ```
 
 ---
@@ -630,7 +608,7 @@ def _apply(self, data):
 **Step 5: Test manually**
 
 ```bash
-pkill -f aiquotabar.py; sleep 1; python3 aiquotabar.py &
+pkill -f "python.*-m aiquotabar"; sleep 1; python3 -m aiquotabar &
 ```
 
 Click the menu bar icon. The floating panel should appear with vibrancy blur, real progress bars, and brand colors. Click outside to dismiss.
@@ -806,7 +784,7 @@ git commit -m "feat: share — copy panel as image or post to X with usage stats
 
 **Files:**
 - Modify: `aiquotabar/ui.py`
-- Modify: `aiquotabar.py` (ensure shim is minimal)
+- Ensure all launch surfaces use `python -m aiquotabar`
 
 **Step 1: Panel dismiss on click-outside and Esc**
 
@@ -841,7 +819,7 @@ NSAnimationContext.runAnimationGroup_(
 **Step 3: Verify all features work end-to-end**
 
 ```bash
-pkill -f aiquotabar.py; sleep 1; python3 aiquotabar.py &
+pkill -f "python.*-m aiquotabar"; sleep 1; python3 -m aiquotabar &
 ```
 
 Test checklist:
@@ -853,9 +831,8 @@ Test checklist:
 - [ ] Gear icon -> settings popover with all options
 - [ ] Share -> Copy Image works
 - [ ] Share -> Post to X opens browser
-- [ ] `python3 aiquotabar.py` works (shim)
 - [ ] `python3 -m aiquotabar` works (package)
-- [ ] `python3 aiquotabar.py --history` works (CLI)
+- [ ] `python3 -m aiquotabar --history` works (CLI)
 - [ ] Notifications still fire at 80%/95%
 - [ ] Auto-update still works
 - [ ] Widget cache still writes

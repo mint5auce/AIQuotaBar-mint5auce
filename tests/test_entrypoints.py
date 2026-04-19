@@ -1,20 +1,9 @@
 from __future__ import annotations
 
-import importlib.util
 import sys
 import types
-from pathlib import Path
 
 import aiquotabar.__main__ as entrypoint
-
-
-def _load_script_module():
-    path = Path(__file__).resolve().parents[1] / "aiquotabar.py"
-    spec = importlib.util.spec_from_file_location("aiquotabar_script", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_main_dispatches_history(monkeypatch):
@@ -46,8 +35,3 @@ def test_main_dispatches_ui_run(monkeypatch):
     entrypoint.main()
 
     assert called["run"] is True
-
-
-def test_aiquotabar_script_reexports_main():
-    script_module = _load_script_module()
-    assert script_module.main is entrypoint.main

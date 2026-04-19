@@ -9,10 +9,9 @@ The product is provider-agnostic. Brand the app as a multi-provider quota monito
 
 ## Current Architecture
 
-The app is package-based. `aiquotabar.py` is the top-level entry point.
+The app is package-based. `aiquotabar/__main__.py` is the canonical Python entry point.
 
 ```text
-aiquotabar.py            Top-level entry point
 aiquotabar/__main__.py   Main entry point and `--history` CLI switch
 aiquotabar/ui.py         Menu bar app, floating panel UI, notifications, menu actions
 aiquotabar/providers.py  Provider fetchers, Claude parsing, cookie detection/minimization
@@ -37,7 +36,7 @@ Important runtime assets live under `assets/`. User-facing docs are in `README.m
 Run locally:
 
 ```bash
-python3 aiquotabar.py
+python3 -m aiquotabar
 ```
 
 History CLI:
@@ -49,7 +48,7 @@ python3 -m aiquotabar --history
 Basic validation:
 
 ```bash
-python3 -m py_compile aiquotabar.py aiquotabar/*.py
+PYTHONPYCACHEPREFIX=.pycache_local python3 -m py_compile aiquotabar/__main__.py aiquotabar/*.py
 ```
 
 Pytest:
@@ -61,7 +60,7 @@ pytest -q
 Post-change validation policy:
 
 - After every code change, run the relevant automated checks before finishing work.
-- For changes under `aiquotabar/*.py` or `aiquotabar.py`, always run `python3 -m py_compile aiquotabar.py aiquotabar/*.py`.
+- For changes under `aiquotabar/*.py`, always run `PYTHONPYCACHEPREFIX=.pycache_local python3 -m py_compile aiquotabar/__main__.py aiquotabar/*.py`.
 - If the change touches existing tested behavior or any file under `tests/`, run `pytest -q` at minimum.
 - Prefer the smallest relevant pytest target while iterating, but before handing off a code change, run the full `pytest -q` suite.
 - If a change cannot be validated locally, say so explicitly and explain why.

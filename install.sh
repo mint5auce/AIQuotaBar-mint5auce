@@ -75,8 +75,11 @@ cat > "$PLIST" <<PLIST_EOF
     <key>ProgramArguments</key>
     <array>
         <string>$PYTHON</string>
-        <string>$INSTALL_DIR/aiquotabar.py</string>
+        <string>-m</string>
+        <string>aiquotabar</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>$INSTALL_DIR</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -95,9 +98,9 @@ launchctl bootstrap gui/$(id -u) "$PLIST"
 echo "  ✓  Added to Login Items (runs at every login)"
 
 # ── 6. Launch now ─────────────────────────────────────────────────────────────
-pkill -f "$INSTALL_DIR/aiquotabar.py" 2>/dev/null || true
+pkill -f "aiquotabar" 2>/dev/null || true
 sleep 1
-"$PYTHON" "$INSTALL_DIR/aiquotabar.py" &>/dev/null &
+(cd "$INSTALL_DIR" && "$PYTHON" -m aiquotabar) &>/dev/null &
 echo "  ✓  Launched!"
 echo ""
 echo "  Look for the ◆ icon in your menu bar."

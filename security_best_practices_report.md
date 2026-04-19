@@ -17,7 +17,7 @@ Together, these issues mean the app does more than "read cookies for usage check
 ## Scope Reviewed
 
 - Python app under `aiquotabar/`
-- Entry point `aiquotabar.py`
+- Entry point `aiquotabar/__main__.py`
 - Installers: `install.sh`, `setup.sh`, `Formula/aiquotabar.rb`
 - Dependency manifest `requirements.txt`
 

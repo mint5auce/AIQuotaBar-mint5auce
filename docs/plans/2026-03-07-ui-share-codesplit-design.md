@@ -90,7 +90,6 @@ Replace the `rumps` NSMenu with a borderless `NSPanel` anchored below the menu b
 ### Structure
 
 ```
-aiquotabar.py              # Shim: from aiquotabar.__main__ import main; main()
 aiquotabar/
   __main__.py              # Entry point (~10 lines)
   config.py                # Constants, load/save config, notification prefs
@@ -110,7 +109,7 @@ config  <-  providers  <-  history  <-  ui  <-  __main__
 
 ### Migration
 
-- `aiquotabar.py` remains the entry point for local runs and packaging.
-- install.sh and the LaunchAgent plist use the renamed `aiquotabar` entrypoint and identifiers.
+- `python3 -m aiquotabar` is the canonical local Python entrypoint.
+- install.sh, login-item launch, and packaging wrappers should invoke `python -m aiquotabar`.
 - No new dependencies.
 - Assets stay in `assets/` at repo root (referenced by `ui.py` via path relative to package).
