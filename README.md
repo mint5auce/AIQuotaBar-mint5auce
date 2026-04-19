@@ -133,6 +133,8 @@ pip install -r requirements.txt
 python3 -m aiquotabar
 ```
 
+`requirements.txt` includes the PyObjC macOS framework bindings the native UI depends on, including Quartz.
+
 To upgrade later, rerun the install command, update via Homebrew, or pull the repo manually and reinstall dependencies.
 
 ---
