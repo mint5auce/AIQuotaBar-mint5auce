@@ -11,7 +11,6 @@ import sys
 import tempfile
 import time
 import threading
-import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 from aiquotabar.config import (
@@ -1118,14 +1117,6 @@ def _ensure_panel_classes():
                 except Exception:
                     log.debug("_ClickHandler.copyImage_ error", exc_info=True)
 
-            def shareOnX_(self, sender):
-                try:
-                    cb = getattr(type(self), '_share_on_x_fn', None)
-                    if callable(cb):
-                        cb()
-                except Exception:
-                    log.debug("_ClickHandler.shareOnX_ error", exc_info=True)
-
         _DismissablePanelClass = _DismissablePanel
         _ClickHandlerClass = _ClickHandler
         _panel_classes_ready = True
@@ -1134,7 +1125,7 @@ def _ensure_panel_classes():
 
 
 class _SharePopover:
-    """Two-option share menu: Copy Image or Share on X."""
+    """Single-action share menu for copying the panel image."""
 
     def __init__(self, app: "AIQuotaBarApp"):
         self.app = app
@@ -1156,15 +1147,6 @@ class _SharePopover:
             if handler:
                 item1.setTarget_(handler)
             menu.addItem_(item1)
-
-            # -- Share on X --
-            item2 = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "  Share on X", b"shareOnX:", ""
-            )
-            item2.setEnabled_(True)
-            if handler:
-                item2.setTarget_(handler)
-            menu.addItem_(item2)
 
             # Pop up at mouse location
             evt = NSApplication.sharedApplication().currentEvent()
@@ -1261,36 +1243,6 @@ class _SharePopover:
             _notify("AI Quota Bar", "Copied!", "Panel screenshot copied to clipboard")
         except Exception:
             log.debug("_SharePopover.copy_image failed", exc_info=True)
-
-    def share_on_x(self):
-        """Open X/Twitter with pre-filled usage stats."""
-        try:
-            parts = []
-            data = self.app._last_data
-            if data and data.session:
-                parts.append(f"Claude {data.session.pct}%")
-            for pd in self.app._provider_data:
-                if pd.error:
-                    continue
-                if pd._rows:
-                    best = max(r.pct for r in pd._rows if r.pct is not None) if pd._rows else None
-                    if best is not None:
-                        parts.append(f"{pd.name} {best}%")
-                elif pd.pct is not None:
-                    parts.append(f"{pd.name} {pd.pct}%")
-
-            stats = " \u00b7 ".join(parts) if parts else "my AI usage"
-            text = f"{stats} \u2014 tracking with AI Quota Bar"
-            url = (
-                "https://x.com/intent/post?text="
-                + urllib.parse.quote(text)
-                + "&url="
-                + urllib.parse.quote("https://github.com/mint5auce/AIQuotaBar-mint5auce")
-            )
-            subprocess.Popen(["open", url])
-        except Exception:
-            log.debug("_SharePopover.share_on_x failed", exc_info=True)
-
 
 class _UsagePanel:
     """Premium floating panel that replaces the default NSMenu dropdown."""
@@ -2209,8 +2161,6 @@ class AIQuotaBarApp(rumps.App):
         # -- Actions ----------------------------------------------------------
         items.append(rumps.MenuItem("Refresh Now", callback=self._do_refresh))
         items.append(rumps.MenuItem("Open claude.ai/settings/usage", callback=self._open_usage_page))
-        items.append(rumps.MenuItem("Share on X / Twitter\u2026", callback=self._share_on_x))
-        items.append(rumps.MenuItem("\u2b50 Star on GitHub", callback=self._open_github))
         items.append(None)
 
         # Status bar display submenu
@@ -2286,6 +2236,8 @@ class AIQuotaBarApp(rumps.App):
         items.append(rumps.MenuItem("Set Session Cookie\u2026", callback=self._set_cookie))
         items.append(rumps.MenuItem("Paste Cookie from Clipboard", callback=self._paste_cookie))
         items.append(rumps.MenuItem("Show Raw API Data\u2026", callback=self._show_raw))
+        items.append(None)
+        items.append(rumps.MenuItem("Star on GitHub", callback=self._open_github))
         items.append(None)
 
         login_item = rumps.MenuItem("Launch at Login", callback=self._toggle_login_item)
@@ -2374,7 +2326,6 @@ class AIQuotaBarApp(rumps.App):
             type(handler)._refresh_fn = lambda: self._do_refresh(None)
             type(handler)._share_fn = lambda sender=None: self._share_popover.show(sender)
             type(handler)._copy_image_fn = lambda: self._share_popover.copy_image()
-            type(handler)._share_on_x_fn = lambda: self._share_popover.share_on_x()
             type(handler)._show_menu_fn = lambda: self._show_fallback_menu()
             type(handler)._gear_menu_fn = lambda: self._get_settings_menu()
             self._click_handler_inst = handler
@@ -2890,26 +2841,6 @@ class AIQuotaBarApp(rumps.App):
 
     def _open_github(self, _sender):
         subprocess.Popen(["open", "https://github.com/mint5auce/AIQuotaBar-mint5auce"])
-
-    def _share_on_x(self, _sender):
-        data = self._last_data
-        if data and data.session:
-            pct = int(data.session.pct)
-            icon = _status_icon(pct)
-            text = (
-                f"I'm at {pct}% of my Claude session limit {icon}\n"
-                f"Tracking Claude + ChatGPT + Cursor usage live in my macOS menu bar "
-                f"\u2014 zero setup, auto-detects from browser\n"
-                f"github.com/mint5auce/AIQuotaBar-mint5auce"
-            )
-        else:
-            text = (
-                "Track Claude + ChatGPT + Cursor usage live in your macOS menu bar "
-                "\u2014 zero setup, auto-detects from browser\n"
-                "github.com/mint5auce/AIQuotaBar-mint5auce"
-            )
-        url = "https://x.com/intent/post?text=" + urllib.parse.quote(text)
-        subprocess.Popen(["open", url])
 
     def _make_provider_key_cb(self, cfg_key: str, name: str):
         def _cb(_sender):
