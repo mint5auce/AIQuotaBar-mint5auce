@@ -4,6 +4,8 @@
 
 No Electron. No browser extension. One command to install.
 
+See [CHANGELOG.md](CHANGELOG.md) for curated release history.
+
 ## About this fork
 
 This fork keeps the original AI Quota Bar concept by [Toprak Yagcioglu](https://github.com/yagcioglutoprak), with these key simplifications and differences from upstream:
