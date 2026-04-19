@@ -95,6 +95,11 @@ COOKIE_KEY_ALLOWLISTS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+COOKIE_PERMISSION_DOC_URL = (
+    "https://github.com/mint5auce/AIQuotaBar-mint5auce/blob/main/"
+    "docs/cookies-and-permissions.md"
+)
+
 
 def parse_cookie_string(raw: str) -> dict:
     """Parse 'key=val; key2=val2' or just a bare sessionKey value."""
@@ -538,17 +543,32 @@ def _warn_keychain_once():
     if _keychain_warned:
         return
     _keychain_warned = True
-    subprocess.run(
-        ["osascript", "-e",
-         'display dialog "AI Quota Bar needs one-time access to your '
-         'browser cookies to read usage from supported AI providers.\\n\\n'
-         'macOS will show a security prompt — click \\"Always Allow\\" '
-         'and it will never ask again." '
-         'with title "AI Quota Bar — One-time Setup" '
-         'buttons {"OK"} default button "OK" '
-         'with icon note'],
-        capture_output=True, timeout=60,
-    )
+    script_lines = [
+        f'set infoUrl to "{COOKIE_PERMISSION_DOC_URL}"',
+        'set dialogText to "AI Quota Bar needs one-time access to the '
+        'browser session cookies it uses to read usage from supported AI '
+        'providers." & return & return & '
+        '"macOS may then show a security prompt. Click \\"Always Allow\\" '
+        'so background refreshes can keep checking usage without asking '
+        'every time." & return & return & '
+        '"If you want the exact cookie list and permission details first, '
+        'click Learn More."',
+        'repeat',
+        'set chosenButton to button returned of (display dialog dialogText '
+        'with title "AI Quota Bar — One-time Setup" '
+        'buttons {"Learn More", "Continue"} default button "Continue" '
+        'with icon note)',
+        'if chosenButton is "Learn More" then',
+        'open location infoUrl',
+        'else',
+        'exit repeat',
+        'end if',
+        'end repeat',
+    ]
+    args = ["osascript"]
+    for line in script_lines:
+        args.extend(["-e", line])
+    subprocess.run(args, capture_output=True, timeout=60)
 
 
 _BROWSERS = (

@@ -129,6 +129,8 @@ Cookie collection is minimized per provider:
 
 Claude cookies auto-detect on startup. ChatGPT, Copilot, and Cursor cookies are only detected when you explicitly enable those providers from the menu.
 
+For the exact cookie list and a plain-English explanation of the macOS permission prompt, see [Browser cookies and permissions](docs/cookies-and-permissions.md).
+
 [`curl_cffi`](https://github.com/yifeikong/curl_cffi) is used to mimic a Chrome TLS fingerprint, which is required to pass Cloudflare's bot protection.
 
 | API field | Displayed as |

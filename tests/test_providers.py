@@ -75,6 +75,29 @@ def test_minimize_cookie_map_passthrough_for_unknown_provider():
     assert providers.minimize_cookie_map("unknown", cookies) == cookies
 
 
+def test_warn_keychain_once_opens_setup_dialog_with_learn_more(monkeypatch):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return None
+
+    monkeypatch.setattr(providers, "_keychain_warned", False)
+    monkeypatch.setattr(providers.subprocess, "run", fake_run)
+
+    providers._warn_keychain_once()
+    providers._warn_keychain_once()
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    script = " ".join(args)
+    assert args[0] == "osascript"
+    assert providers.COOKIE_PERMISSION_DOC_URL in script
+    assert 'buttons {"Learn More", "Continue"}' in script
+    assert '\\"Always Allow\\"' in script
+    assert kwargs == {"capture_output": True, "timeout": 60}
+
+
 def test_strip_cf_cookies_removes_cloudflare_values():
     cookies = {
         "sessionKey": "abc",
