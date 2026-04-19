@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 import aiquotabar.providers as providers
@@ -473,3 +475,152 @@ def test_fetch_cursor_returns_error_from_http_or_json_failures(monkeypatch):
     )
     json_data = providers.fetch_cursor("WorkosCursorSessionToken=abc")
     assert json_data.error == "bad cursor json"
+
+
+def test_detect_cookies_for_provider_reports_success_and_not_found(monkeypatch):
+    monkeypatch.setattr(providers, "_BROWSER_COOKIE3_OK", True)
+    monkeypatch.setattr(
+        providers,
+        "_detect_cookies_once",
+        lambda domain, target, provider_key: "sessionKey=abc" if provider_key == "cookie_str" else None,
+    )
+
+    success = providers.detect_cookies_for_provider("cookie_str")
+    not_found = providers.detect_cookies_for_provider("chatgpt_cookies")
+
+    assert success.status == "ok"
+    assert success.cookie_str == "sessionKey=abc"
+    assert not_found.status == "not_found"
+    assert not_found.cookie_str is None
+
+
+def test_detect_cookies_for_provider_reports_unsupported_and_helper_errors(monkeypatch):
+    monkeypatch.setattr(providers, "_BROWSER_COOKIE3_OK", True)
+
+    unsupported = providers.detect_cookies_for_provider("nope")
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("cookie store unavailable")
+
+    monkeypatch.setattr(providers, "_detect_cookies_once", boom)
+    failed = providers.detect_cookies_for_provider("cookie_str")
+
+    assert unsupported.status == "error"
+    assert unsupported.error_type == "KeyError"
+    assert failed.status == "error"
+    assert failed.error_type == "RuntimeError"
+
+
+def test_run_cookie_detection_cli_prints_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        providers,
+        "detect_cookies_for_provider",
+        lambda provider_key: providers.CookieDetectResult(
+            provider_key=provider_key,
+            status="ok",
+            cookie_str="sessionKey=abc",
+        ),
+    )
+
+    rc = providers.run_cookie_detection_cli("cookie_str")
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert rc == 0
+    assert payload == {
+        "provider_key": "cookie_str",
+        "status": "ok",
+        "cookie_str": "sessionKey=abc",
+    }
+
+
+def test_detect_cookies_with_helper_parses_success_and_error_payloads(monkeypatch):
+    monkeypatch.setattr(providers, "_BROWSER_COOKIE3_OK", True)
+    monkeypatch.setattr(providers.sys, "executable", "/tmp/fake-python")
+
+    outputs = [
+        subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps({"status": "ok", "cookie_str": "sessionKey=abc"}),
+            stderr="",
+        ),
+        subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout=json.dumps({"status": "error", "error_type": "RuntimeError"}),
+            stderr="traceback",
+        ),
+    ]
+
+    def fake_run(*args, **kwargs):
+        return outputs.pop(0)
+
+    monkeypatch.setattr(providers.subprocess, "run", fake_run)
+
+    success = providers.detect_cookies_with_helper("cookie_str")
+    failed = providers.detect_cookies_with_helper("cookie_str")
+
+    assert success.status == "ok"
+    assert success.cookie_str == "sessionKey=abc"
+    assert failed.status == "error"
+    assert failed.error_type == "RuntimeError"
+    assert failed.returncode == 1
+
+
+def test_detect_cookies_with_helper_distinguishes_invalid_json_and_timeout(monkeypatch):
+    monkeypatch.setattr(providers, "_BROWSER_COOKIE3_OK", True)
+
+    invalid = subprocess.CompletedProcess(
+        args=[],
+        returncode=0,
+        stdout="not-json",
+        stderr="",
+    )
+
+    monkeypatch.setattr(providers.subprocess, "run", lambda *args, **kwargs: invalid)
+    invalid_result = providers.detect_cookies_with_helper("cookie_str")
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=["python"], timeout=75)
+
+    monkeypatch.setattr(providers.subprocess, "run", timeout)
+    timeout_result = providers.detect_cookies_with_helper("cookie_str")
+
+    assert invalid_result.status == "error"
+    assert invalid_result.error_type == "JSONDecodeError"
+    assert timeout_result.status == "error"
+    assert timeout_result.error_type == "TimeoutExpired"
+
+
+def test_detect_cookies_with_helper_uses_app_executable_in_frozen_mode(monkeypatch):
+    monkeypatch.setattr(providers, "_BROWSER_COOKIE3_OK", True)
+    monkeypatch.setattr(providers.sys, "frozen", "macosx_app", raising=False)
+    monkeypatch.setenv("RESOURCEPATH", "/tmp/MyApp.app/Contents/Resources")
+    monkeypatch.setenv("ARGVZERO", "/tmp/MyApp.app/Contents/MacOS/AIQuotaBar")
+
+    captured = {}
+
+    def fake_exists(path):
+        return path == "/tmp/MyApp.app/Contents/MacOS/AIQuotaBar"
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=json.dumps({"status": "not_found"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(providers.os.path, "exists", fake_exists)
+    monkeypatch.setattr(providers.os, "access", lambda path, mode: path == "/tmp/MyApp.app/Contents/MacOS/AIQuotaBar")
+    monkeypatch.setattr(providers.subprocess, "run", fake_run)
+
+    result = providers.detect_cookies_with_helper("cookie_str")
+
+    assert captured["cmd"] == [
+        "/tmp/MyApp.app/Contents/MacOS/AIQuotaBar",
+        "--detect-cookies",
+        "cookie_str",
+    ]
+    assert result.status == "not_found"

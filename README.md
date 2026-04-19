@@ -39,6 +39,7 @@ Updates are manual: rerun the installer or pull the repo and rebuild yourself. T
 - **Burn rate + ETA** — predicts when you'll hit each limit based on your current pace
 - **Pacing alerts** — notifies you when you're on track to hit a limit within 30 minutes
 - **Auto-refresh on session expiry** — silently grabs fresh cookies when your session expires
+- **Explicit setup diagnostics** — the floating panel shows which provider is missing setup or failing refresh, plus the next action to take
 - **macOS notifications** — alerts at 80% and 95% usage for Claude, ChatGPT, and Cursor
 - **Configurable refresh** — 1 / 5 / 15 min
 - **Runs at login** — via LaunchAgent, toggle from the menu
@@ -127,7 +128,9 @@ Cookie collection is minimized per provider:
 - Copilot: `user_session`, `logged_in`, `dotcom_user`
 - Cursor: `WorkosCursorSessionToken`
 
-Claude cookies auto-detect on startup. ChatGPT, Copilot, and Cursor cookies are only detected when you explicitly enable those providers from the menu.
+Claude cookies auto-detect on startup through a separate helper launch so refresh works reliably in source runs, alias builds, and bundled app launches. ChatGPT, Copilot, and Cursor cookies are only detected when you explicitly enable those providers from the menu.
+
+If Claude setup is broken, the app still refreshes any other configured providers and shows provider-specific diagnostics in the panel instead of a blank waiting state.
 
 For the exact cookie list and a plain-English explanation of the macOS permission prompt, see [Browser cookies and permissions](docs/cookies-and-permissions.md).
 
@@ -151,6 +154,8 @@ tail -50 ~/.aiquotabar.log
 
 **Cookies not detected**
 Make sure you're logged into [claude.ai](https://claude.ai) in your browser, then click **Auto-detect from Browser** in the menu.
+
+If the panel shows a provider diagnostic, follow the action text there first. The app now distinguishes between missing setup, expired auth, and fetch failures per provider.
 
 **Session expired / showing ◆ !**
 The app will try to auto-detect fresh cookies from your browser. If that fails, click **Set Session Cookie…**.

@@ -16,6 +16,7 @@ This app does not install a browser extension, inject code into web pages, or se
 ## What The App Does With Those Cookies
 
 1. It reads the browser's local cookie store for the relevant provider domain.
+   It does that through a short-lived helper launch so browser access stays isolated from the menu bar UI process.
 2. It filters the result down to the provider-specific allowlist above.
 3. It saves that filtered cookie string in the macOS Keychain, not in plaintext config.
 4. It sends the cookie only to the matching provider endpoint needed to fetch usage data.

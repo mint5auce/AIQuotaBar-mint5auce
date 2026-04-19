@@ -60,6 +60,16 @@ class ProviderData:
         return None
 
 
+@dataclass
+class CookieDetectResult:
+    provider_key: str
+    status: str
+    cookie_str: str | None = None
+    error_type: str | None = None
+    detail: str | None = None
+    returncode: int | None = None
+
+
 # ── claude.ai API ─────────────────────────────────────────────────────────────
 
 HEADERS = {
@@ -93,6 +103,15 @@ COOKIE_KEY_ALLOWLISTS: dict[str, tuple[str, ...]] = {
     "cursor_cookies": (
         "WorkosCursorSessionToken",
     ),
+}
+
+COOKIE_DETECTION_TARGETS: dict[str, tuple[str, str, str]] = {
+    "cookie_str": ("claude.ai", "sessionKey", "Claude"),
+    "chatgpt_cookies": (
+        "chatgpt.com", "__Secure-next-auth.session-token", "ChatGPT",
+    ),
+    "copilot_cookies": ("github.com", "user_session", "Copilot"),
+    "cursor_cookies": ("cursor.com", "WorkosCursorSessionToken", "Cursor"),
 }
 
 COOKIE_PERMISSION_DOC_URL = (
@@ -618,43 +637,206 @@ def _detect_cookies_worker(domain: str, target: str, allowed: list[str], queue) 
         pass
 
 
-def _run_cookie_detection(domain: str, target_cookie: str, provider_key: str) -> str | None:
-    """Run browser_cookie3 in an isolated child process (crash-safe).
-
-    Uses multiprocessing 'spawn' (not 'fork') because rumps/PyObjC has
-    already initialized the AppKit run loop, and because the py2app bundle
-    doesn't ship a separately-invokable Python `-c` interpreter.
-    """
-    import multiprocessing as mp
-
+def _detect_cookies_once(domain: str, target_cookie: str, provider_key: str) -> str | None:
+    """Read browser cookies for one provider inside the current process."""
     allowlist = sorted(set(COOKIE_KEY_ALLOWLISTS.get(provider_key, ())) | {target_cookie})
-    try:
-        ctx = mp.get_context("spawn")
-        queue = ctx.Queue()
-        proc = ctx.Process(
-            target=_detect_cookies_worker,
-            args=(domain, target_cookie, allowlist, queue),
-        )
-        proc.start()
-        proc.join(timeout=60)
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(timeout=5)
-            log.debug("cookie-detect domain=%s timed out", domain)
-            return None
-        result = None
+    allowed_set = set(allowlist)
+    candidates: list[tuple[int, str]] = []
+    for name in _BROWSERS:
+        fn = getattr(browser_cookie3, name, None)
+        if fn is None:
+            continue
         try:
-            result = queue.get_nowait()
+            jar = fn(domain_name=domain)
+            cookies = {x.name: x for x in jar}
+            if target_cookie not in cookies:
+                continue
+            expires = cookies[target_cookie].expires or 0
+            selected = {k: c.value for k, c in cookies.items() if k in allowed_set}
+            cookie_str = "; ".join(f"{k}={v}" for k, v in selected.items())
+            candidates.append((expires, cookie_str))
         except Exception:
             pass
-        log.debug(
-            "cookie-detect domain=%s target=%s rc=%s found=%s",
-            domain, target_cookie, proc.exitcode, result is not None,
-        )
-        return result
-    except Exception as e:
-        log.debug("_run_cookie_detection failed: %s", e)
+    if not candidates:
         return None
+    candidates.sort(key=lambda x: (x[0], len(x[1])), reverse=True)
+    return candidates[0][1]
+
+
+def detect_cookies_for_provider(provider_key: str) -> CookieDetectResult:
+    """Read cookies for a provider in the current process."""
+    target = COOKIE_DETECTION_TARGETS.get(provider_key)
+    if not target:
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type="KeyError",
+            detail="Unsupported provider key",
+        )
+    if not _BROWSER_COOKIE3_OK:
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type="ImportError",
+            detail="browser_cookie3 is not installed",
+        )
+    domain, target_cookie, _ = target
+    try:
+        cookie_str = _detect_cookies_once(domain, target_cookie, provider_key)
+    except Exception as e:
+        log.debug(
+            "cookie-detect helper provider=%s failed type=%s",
+            provider_key, e.__class__.__name__,
+        )
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type=e.__class__.__name__,
+            detail=str(e)[:120],
+        )
+    if cookie_str:
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="ok",
+            cookie_str=cookie_str,
+        )
+    return CookieDetectResult(provider_key=provider_key, status="not_found")
+
+
+def run_cookie_detection_cli(provider_key: str) -> int:
+    """CLI entrypoint used by the app bundle to isolate cookie reads."""
+    result = detect_cookies_for_provider(provider_key)
+    payload = {
+        "provider_key": result.provider_key,
+        "status": result.status,
+    }
+    if result.cookie_str:
+        payload["cookie_str"] = result.cookie_str
+    if result.error_type:
+        payload["error_type"] = result.error_type
+    if result.detail:
+        payload["detail"] = result.detail
+    print(json.dumps(payload))
+    return 0 if result.status in {"ok", "not_found"} else 1
+
+
+def _frozen_app_executable() -> str | None:
+    resource_path = os.environ.get("RESOURCEPATH")
+    argvzero = os.environ.get("ARGVZERO")
+    if not resource_path or not argvzero:
+        return None
+    candidate = os.path.abspath(
+        os.path.join(resource_path, "..", "MacOS", os.path.basename(argvzero))
+    )
+    if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+    return None
+
+
+def detect_cookies_with_helper(provider_key: str) -> CookieDetectResult:
+    """Run cookie detection in a helper process outside the GUI boot path."""
+    if provider_key not in COOKIE_DETECTION_TARGETS:
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type="KeyError",
+            detail="Unsupported provider key",
+        )
+    if not _BROWSER_COOKIE3_OK:
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type="ImportError",
+            detail="browser_cookie3 is not installed",
+        )
+
+    frozen_executable = (
+        _frozen_app_executable() if getattr(sys, "frozen", None) == "macosx_app" else None
+    )
+    if frozen_executable:
+        cmd = [frozen_executable, "--detect-cookies", provider_key]
+    else:
+        main_path = getattr(sys.modules.get("__main__"), "__file__", None) or sys.argv[0]
+        if main_path and os.path.exists(main_path):
+            cmd = [sys.executable, main_path, "--detect-cookies", provider_key]
+        else:
+            cmd = [sys.executable, "-m", "aiquotabar", "--detect-cookies", provider_key]
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=75,
+        )
+    except subprocess.TimeoutExpired:
+        log.debug("cookie-detect helper provider=%s timed out", provider_key)
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type="TimeoutExpired",
+            detail="Cookie detection helper timed out",
+        )
+    except Exception as e:
+        log.debug(
+            "cookie-detect helper provider=%s launch failed type=%s",
+            provider_key, e.__class__.__name__,
+        )
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type=e.__class__.__name__,
+            detail=str(e)[:120],
+        )
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    if not stdout:
+        err_type = "EmptyOutput"
+        log.debug(
+            "cookie-detect helper provider=%s rc=%s status=%s stderr=%s",
+            provider_key, proc.returncode, err_type, stderr[:120],
+        )
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type=err_type,
+            detail=stderr[:120] or "Cookie detection helper produced no output",
+            returncode=proc.returncode,
+        )
+
+    try:
+        payload = json.loads(stdout.splitlines()[-1])
+    except json.JSONDecodeError:
+        err_type = "JSONDecodeError"
+        log.debug(
+            "cookie-detect helper provider=%s rc=%s status=%s stdout=%s",
+            provider_key, proc.returncode, err_type, stdout[:120],
+        )
+        return CookieDetectResult(
+            provider_key=provider_key,
+            status="error",
+            error_type=err_type,
+            detail="Cookie detection helper returned invalid JSON",
+            returncode=proc.returncode,
+        )
+
+    result = CookieDetectResult(
+        provider_key=provider_key,
+        status=payload.get("status") or "error",
+        cookie_str=payload.get("cookie_str"),
+        error_type=payload.get("error_type"),
+        detail=payload.get("detail"),
+        returncode=proc.returncode,
+    )
+    log.debug(
+        "cookie-detect helper provider=%s rc=%s status=%s found=%s error_type=%s",
+        provider_key,
+        proc.returncode,
+        result.status,
+        result.cookie_str is not None,
+        result.error_type,
+    )
+    return result
 
 
 def _auto_detect_cookies() -> str | None:
@@ -662,30 +844,32 @@ def _auto_detect_cookies() -> str | None:
     if not _BROWSER_COOKIE3_OK:
         return None
     _warn_keychain_once()
-    return _run_cookie_detection("claude.ai", "sessionKey", "cookie_str")
+    result = detect_cookies_with_helper("cookie_str")
+    return result.cookie_str if result.status == "ok" else None
 
 
 def _auto_detect_chatgpt_cookies() -> str | None:
     """Detect chatgpt.com session cookies from the browser (crash-safe subprocess)."""
     if not _BROWSER_COOKIE3_OK:
         return None
-    return _run_cookie_detection(
-        "chatgpt.com", "__Secure-next-auth.session-token", "chatgpt_cookies",
-    )
+    result = detect_cookies_with_helper("chatgpt_cookies")
+    return result.cookie_str if result.status == "ok" else None
 
 
 def _auto_detect_copilot_cookies() -> str | None:
     """Detect github.com session cookies from the browser (crash-safe subprocess)."""
     if not _BROWSER_COOKIE3_OK:
         return None
-    return _run_cookie_detection("github.com", "user_session", "copilot_cookies")
+    result = detect_cookies_with_helper("copilot_cookies")
+    return result.cookie_str if result.status == "ok" else None
 
 
 def _auto_detect_cursor_cookies() -> str | None:
     """Detect cursor.com session cookies from the browser (crash-safe subprocess)."""
     if not _BROWSER_COOKIE3_OK:
         return None
-    return _run_cookie_detection("cursor.com", "WorkosCursorSessionToken", "cursor_cookies")
+    result = detect_cookies_with_helper("cursor_cookies")
+    return result.cookie_str if result.status == "ok" else None
 
 
 COOKIE_DETECTORS = {

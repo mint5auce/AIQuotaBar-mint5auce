@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 
 from aiquotabar.config import (
@@ -22,7 +23,8 @@ from aiquotabar.config import (
 from aiquotabar.providers import (
     LimitRow, UsageData, ProviderData, parse_usage, fetch_raw,
     fetch_claude_code_stats, COOKIE_DETECTORS, PROVIDER_REGISTRY, COOKIE_PROVIDERS,
-    CurlHTTPError, parse_cookie_string,
+    CookieDetectResult, CurlHTTPError, parse_cookie_string,
+    detect_cookies_with_helper,
     minimize_cookie_string,
     _auto_detect_cookies, _auto_detect_chatgpt_cookies,
     _auto_detect_copilot_cookies, _auto_detect_cursor_cookies,
@@ -51,6 +53,147 @@ def _resolve_icon_dir() -> str:
 _ICON_DIR   = _resolve_icon_dir()
 _ICON_SIZE  = 14   # points -- matches menu bar font height
 _icon_cache: dict = {}
+_UI_APPLY_SENTINEL = object()
+
+
+@dataclass
+class ProviderRefreshStatus:
+    name: str
+    state: str
+    summary: str
+    action: str = ""
+    configured: bool = False
+
+
+@dataclass
+class RefreshSnapshot:
+    claude_data: UsageData | None = None
+    provider_data: list[ProviderData] = field(default_factory=list)
+    statuses: dict[str, ProviderRefreshStatus] = field(default_factory=dict)
+    raw: dict = field(default_factory=dict)
+    last_updated: datetime | None = None
+    claude_http_status: int | None = None
+    claude_auth_failed: bool = False
+
+
+_STATUS_ORDER = [
+    "Claude", "ChatGPT", "Cursor", "Copilot", "OpenAI", "MiniMax", "GLM (Zhipu)",
+]
+_STATUS_COLORS = {
+    "Claude": "#D97757",
+    "ChatGPT": "#74AA9C",
+    "Cursor": "#00A0D1",
+    "Copilot": "#6E40C9",
+    "OpenAI": "#10A37F",
+    "MiniMax": "#4B5563",
+    "GLM (Zhipu)": "#4B5563",
+    "More Providers": "#4B5563",
+}
+
+
+def _provider_status_color(name: str) -> str:
+    return _STATUS_COLORS.get(name, "#4B5563")
+
+
+def _provider_status_action(name: str, state: str) -> str:
+    if state == "missing_credentials":
+        if name == "Claude":
+            return "Sign in to claude.ai, then click Refresh or Auto-detect from Browser."
+        if name in ("ChatGPT", "Cursor", "Copilot"):
+            return "Enable it from the gear menu to monitor this provider."
+        return "Add its API key from the gear menu to monitor this provider."
+    if state == "autodetect_failed":
+        return "Sign in to the provider site in a supported browser, then try Refresh again."
+    if state == "auth_failed":
+        if name == "Claude":
+            return "Refresh the browser session or paste a fresh cookie string."
+        if name in ("ChatGPT", "Cursor", "Copilot"):
+            return "Refresh this provider from the gear menu to save a fresh browser session."
+        return "Update the saved API key from the gear menu."
+    return "Check the provider session or credentials, then refresh again."
+
+
+def _status_lines(status: ProviderRefreshStatus | None) -> list[str]:
+    if status is None or status.state == "ok":
+        return []
+    lines = [f"  ⚠️  {status.summary}"]
+    if status.action:
+        lines.append(f"  {status.action}")
+    return lines
+
+
+def _diagnostic_sections(
+    statuses: dict[str, ProviderRefreshStatus],
+    *,
+    include_missing: bool,
+) -> list[tuple[str, str, list[str]]]:
+    sections: list[tuple[str, str, list[str]]] = []
+    missing_names: list[str] = []
+
+    for name in _STATUS_ORDER:
+        status = statuses.get(name)
+        if status is None or status.state == "ok":
+            continue
+        if status.state == "missing_credentials" and not status.configured and name != "Claude":
+            if include_missing:
+                missing_names.append(name)
+            continue
+        if status.state == "missing_credentials" and not include_missing:
+            continue
+        lines = [status.summary]
+        if status.action:
+            lines.append(status.action)
+        sections.append((name, _provider_status_color(name), lines))
+
+    if include_missing and missing_names:
+        sections.append((
+            "More Providers",
+            _provider_status_color("More Providers"),
+            [
+                "Not enabled yet",
+                "Enable "
+                + ", ".join(missing_names)
+                + " from the gear menu to start monitoring them.",
+            ],
+        ))
+
+    return sections
+
+
+def _has_successful_provider_data(provider_data: list[ProviderData]) -> bool:
+    return any(not pd.error for pd in provider_data)
+
+
+def _available_bar_segments(
+    data: UsageData | None,
+    provider_data: list[ProviderData],
+) -> dict[str, tuple[str, int, str]]:
+    available: dict[str, tuple[str, int, str]] = {}
+
+    if data is not None:
+        primary = data.session or data.weekly_all or data.weekly_sonnet
+        if primary:
+            weekly_maxed = any(
+                row and row.pct >= CRIT_THRESHOLD
+                for row in [data.weekly_all, data.weekly_sonnet]
+            )
+            extra = " ·" if (
+                weekly_maxed and primary is data.session and primary.pct < CRIT_THRESHOLD
+            ) else ""
+            available["Claude"] = ("Claude", primary.pct, extra)
+
+    for pd in provider_data:
+        if pd.error:
+            continue
+        rows = getattr(pd, "_rows", None)
+        if rows:
+            pct = max(row.pct for row in rows)
+        else:
+            pct = pd.pct
+        if pct is not None:
+            available[pd.name] = (pd.name, pct, "")
+
+    return available
 
 
 def _bar_icon(filename: str, tint_hex: str | None = None):
@@ -1476,6 +1619,7 @@ class _UsagePanel:
         # ── Provider sections ───────────────────────────────────────────
         data = self._app._last_data
         provider_data = self._app._provider_data
+        refresh_status = self._app._refresh_status
         history = self._app._history
         history_db = self._app._history_db
 
@@ -1575,8 +1719,24 @@ class _UsagePanel:
                     y += 14 + 2
             y += self.SECTION_GAP
 
+        # Diagnostic sections
+        diagnostics = _diagnostic_sections(
+            refresh_status,
+            include_missing=not has_any_data,
+        )
+        for name, color_hex, lines in diagnostics:
+            right_text = ""
+            if name == "Claude" and data and data.session:
+                right_text = data.session.reset_str
+            elements.append(('provider_header', y, 18, name, color_hex, right_text))
+            y += 18 + 6
+            for line in lines:
+                elements.append(('small_text', y, 14, line))
+                y += 14 + 2
+            y += self.SECTION_GAP
+
         # No data placeholder
-        if not has_any_data:
+        if not has_any_data and not diagnostics:
             elements.append(('placeholder', y, 40))
             y += 40 + self.SECTION_GAP
 
@@ -1647,6 +1807,15 @@ class _UsagePanel:
                     doc, PAD, real_y, inner, h,
                     spark_str,
                     NSTextField, NSFont, NSColor, NSMakeRect,
+                )
+
+            elif kind == 'small_text':
+                _, _, _, text = elem
+                self._render_small_text(
+                    doc, PAD, real_y, inner, h,
+                    text,
+                    NSTextField, NSFont, NSColor, NSMakeRect,
+                    size=11, weight=0.0,
                 )
 
             elif kind == 'hit_line':
@@ -1872,6 +2041,7 @@ class AIQuotaBarApp(rumps.App):
         self._last_raw: dict = {}
         self._last_data: UsageData | None = None
         self._provider_data: list[ProviderData] = []
+        self._refresh_status: dict[str, ProviderRefreshStatus] = {}
         self._warned_pcts: set[str] = set()   # track which rows we've notified
         self._prev_pcts: dict[str, int] = {}  # previous pct per row key (reset detection)
         self._auth_fail_count = 0
@@ -1892,7 +2062,7 @@ class AIQuotaBarApp(rumps.App):
 
         # Thread-safe UI update queue (background thread -> main thread)
         self._ui_pending_title: str | None = None
-        self._ui_pending_data: UsageData | None = None
+        self._ui_pending_data: UsageData | object | None = None
         self._ui_lock = threading.Lock()
         self._config_lock = threading.Lock()
         self._db_lock = threading.Lock()
@@ -1984,7 +2154,12 @@ class AIQuotaBarApp(rumps.App):
         items.append(_section_header_mi("  Claude", "claude_icon.png", "#D97757"))
 
         if data is None or not any([data.session, data.weekly_all, data.weekly_sonnet]):
-            items.append(_mi("  No data \u2014 click Auto-detect from Browser"))
+            status_lines = _status_lines(self._refresh_status.get("Claude"))
+            if status_lines:
+                for line in status_lines:
+                    items.append(_mi(line))
+            else:
+                items.append(_mi("  No data \u2014 click Auto-detect from Browser"))
         else:
             if data.session:
                 lines = _row_lines(data.session)
@@ -2012,6 +2187,21 @@ class AIQuotaBarApp(rumps.App):
                     items.append(_mi(lines[0]))
                     items.append(_colored_mi(lines[1], "#D97757"))
                     items.append(None)
+
+        if data is None or not any([data.session, data.weekly_all, data.weekly_sonnet]):
+            grouped = next(
+                (
+                    entry for entry in _diagnostic_sections(
+                        self._refresh_status, include_missing=True,
+                    )
+                    if entry[0] == "More Providers"
+                ),
+                None,
+            )
+            if grouped:
+                for line in grouped[2]:
+                    items.append(_mi(f"  {line}"))
+                items.append(None)
 
 
         # -- CHATGPT section (if detected) ------------------------------------
@@ -2264,10 +2454,10 @@ class AIQuotaBarApp(rumps.App):
         with self._ui_lock:
             self._ui_pending_title = title
 
-    def _post_data(self, data: UsageData):
+    def _post_data(self, data: UsageData | None):
         """Queue a full UI update (title + menu) from any thread."""
         with self._ui_lock:
-            self._ui_pending_data = data
+            self._ui_pending_data = _UI_APPLY_SENTINEL if data is None else data
 
     def _flush_ui(self, _timer):
         """Main-thread ticker: apply any queued updates from background threads."""
@@ -2276,7 +2466,9 @@ class AIQuotaBarApp(rumps.App):
             data = self._ui_pending_data
             self._ui_pending_title = None
             self._ui_pending_data = None
-        if data is not None:
+        if data is _UI_APPLY_SENTINEL:
+            self._apply(None)
+        elif data is not None:
             self._apply(data)
         elif title is not None:
             self.title = title
@@ -2408,118 +2600,240 @@ class AIQuotaBarApp(rumps.App):
             self._fetching = True
         threading.Thread(target=self._fetch_and_update, daemon=True).start()
 
-    def _fetch_and_update(self):
+    def _make_refresh_status(
+        self,
+        name: str,
+        state: str,
+        summary: str,
+        *,
+        configured: bool,
+        action: str | None = None,
+    ) -> ProviderRefreshStatus:
+        return ProviderRefreshStatus(
+            name=name,
+            state=state,
+            summary=summary,
+            action=action if action is not None else _provider_status_action(name, state),
+            configured=configured,
+        )
+
+    def _fetch_claude_snapshot(
+        self,
+    ) -> tuple[UsageData | None, dict, ProviderRefreshStatus, bool, int | None]:
+        with self._config_lock:
+            cookie_str = self._get_secret_value(
+                "cookie_str", "Could not read saved Claude cookies from Keychain",
+            )
+
+        if not cookie_str:
+            if _BROWSER_COOKIE3_OK:
+                _warn_keychain_once()
+                detect_result = detect_cookies_with_helper("cookie_str")
+            else:
+                detect_result = CookieDetectResult(
+                    provider_key="cookie_str",
+                    status="error",
+                    error_type="ImportError",
+                    detail="browser_cookie3 is not installed",
+                )
+
+            if detect_result.status == "ok" and detect_result.cookie_str:
+                with self._config_lock:
+                    if not self._set_secret_value(
+                        "cookie_str",
+                        detect_result.cookie_str,
+                        "Could not save Claude cookies to Keychain",
+                    ):
+                        return None, {}, self._make_refresh_status(
+                            "Claude",
+                            "fetch_failed",
+                            "Could not save Claude cookies to Keychain.",
+                            configured=False,
+                            action="Unlock Keychain Access and refresh again.",
+                        ), False, None
+                cookie_str = detect_result.cookie_str
+            elif detect_result.status == "not_found":
+                return None, {}, self._make_refresh_status(
+                    "Claude",
+                    "autodetect_failed",
+                    "No Claude browser session was found.",
+                    configured=False,
+                ), False, None
+            else:
+                summary = (
+                    "Automatic Claude browser detection is unavailable."
+                    if detect_result.error_type == "ImportError"
+                    else "Claude cookie detection failed."
+                )
+                action = (
+                    "Install browser-cookie3 to enable browser detection."
+                    if detect_result.error_type == "ImportError"
+                    else "Try Refresh again or paste a Claude cookie string manually."
+                )
+                return None, {}, self._make_refresh_status(
+                    "Claude",
+                    "autodetect_failed",
+                    summary,
+                    configured=False,
+                    action=action,
+                ), False, None
 
         try:
-            with self._config_lock:
-                sk = self._get_secret_value(
-                    "cookie_str", "Could not read saved Claude cookies from Keychain"
-                )
-            if not sk:
-                sk = _auto_detect_cookies()
-                if sk:
-                    with self._config_lock:
-                        if not self._set_secret_value(
-                            "cookie_str", sk,
-                            "Could not save Claude cookies to Keychain",
-                        ):
-                            self._post_title("\u25c6")
-                            self._fetching = False
-                            return
-            if not sk:
-                self._post_title("\u25c6")
-                self._fetching = False
-                return
-            raw = fetch_raw(sk)
-            self._last_raw = raw
-            self._auth_fail_count = 0
+            raw = fetch_raw(cookie_str)
             data = parse_usage(raw)
-            self._last_data = data
-            self._last_updated = datetime.now()
             log.debug("parsed UsageData: %s", data)
-            self._check_warnings(data)
-            self._fetch_providers()
-            self._check_provider_warnings(self._provider_data)
-            self._cc_stats = fetch_claude_code_stats()
-
-            # -- record usage history --
-            if data.session:
-                _append_history(self._history, "claude", data.session.pct)
-            # Per-row history for multi-limit providers (avoids mixing
-            # different limit types which made ETAs jump around).
-            for prefix, pname in [("chatgpt", "ChatGPT"), ("cursor", "Cursor")]:
-                pd = next((p for p in self._provider_data if p.name == pname), None)
-                if pd and not pd.error:
-                    rows = getattr(pd, "_rows", None)
-                    if rows:
-                        for row in rows:
-                            hkey = f"{prefix}_{row.label.lower().replace(' ', '_')}"
-                            _append_history(self._history, hkey, row.pct)
-            copilot_pd = next(
-                (pd for pd in self._provider_data if pd.name == "Copilot"), None
-            )
-            if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
-                _append_history(self._history, "copilot", copilot_pd.pct)
-            _save_history(self._history)
-
-            # -- record to SQLite history --
-            try:
-                with self._db_lock:
-                    if data.session:
-                        _record_sample(self._history_db, "claude", data.session.pct)
-                    for prefix, pname in [("chatgpt", "ChatGPT"), ("cursor", "Cursor")]:
-                        pd = next((p for p in self._provider_data if p.name == pname), None)
-                        if pd and not pd.error:
-                            rows = getattr(pd, "_rows", None)
-                            if rows:
-                                for row in rows:
-                                    hkey = f"{prefix}_{row.label.lower().replace(' ', '_')}"
-                                    _record_sample(self._history_db, hkey, row.pct)
-                    if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
-                        _record_sample(self._history_db, "copilot", copilot_pd.pct)
-                    self._history_db.commit()
-                    # Periodic rollup (every hour)
-                    if time.time() - self._last_rollup > 3600:
-                        _rollup_daily_stats(self._history_db)
-                        self._last_rollup = time.time()
-            except Exception:
-                log.exception("SQLite history recording failed")
-
-            self._check_pacing_alerts()
-
-            self._post_data(data)          # <- main thread applies title + menu
+            return data, raw, self._make_refresh_status(
+                "Claude", "ok", "Tracking normally.", configured=True, action="",
+            ), False, None
         except CurlHTTPError as e:
             resp = getattr(e, "response", None)
             code = getattr(resp, "status_code", 0) or 0
-            log.error("HTTP error: %s (status=%s)", e, code, exc_info=True)
+            log.error("Claude fetch failed: %s (status=%s)", e, code, exc_info=True)
             if code in (401, 403):
+                return None, {}, self._make_refresh_status(
+                    "Claude",
+                    "auth_failed",
+                    "Claude session expired or was rejected.",
+                    configured=True,
+                ), True, code
+            summary = f"Claude request failed ({code})." if code else "Claude request failed."
+            return None, {}, self._make_refresh_status(
+                "Claude",
+                "fetch_failed",
+                summary,
+                configured=True,
+            ), False, code
+        except Exception:
+            log.exception("Claude fetch failed")
+            return None, {}, self._make_refresh_status(
+                "Claude",
+                "fetch_failed",
+                "Claude usage fetch failed.",
+                configured=True,
+            ), False, None
+
+    def _fetch_snapshot(self) -> RefreshSnapshot:
+        claude_data, raw, claude_status, claude_auth_failed, claude_http_status = (
+            self._fetch_claude_snapshot()
+        )
+        provider_data, provider_statuses = self._fetch_providers()
+        statuses = dict(provider_statuses)
+        statuses["Claude"] = claude_status
+
+        any_success = claude_data is not None or _has_successful_provider_data(provider_data)
+        return RefreshSnapshot(
+            claude_data=claude_data,
+            provider_data=provider_data,
+            statuses=statuses,
+            raw=raw,
+            last_updated=datetime.now() if any_success else None,
+            claude_http_status=claude_http_status,
+            claude_auth_failed=claude_auth_failed,
+        )
+
+    def _fetch_and_update(self):
+        try:
+            snapshot = self._fetch_snapshot()
+            self._last_raw = snapshot.raw
+            self._last_data = snapshot.claude_data
+            self._provider_data = snapshot.provider_data
+            self._refresh_status = snapshot.statuses
+            self._last_updated = snapshot.last_updated
+
+            if snapshot.claude_data is not None:
+                self._auth_fail_count = 0
+                self._check_warnings(snapshot.claude_data)
+            elif snapshot.claude_auth_failed:
                 self._auth_fail_count += 1
-                self._post_title("\u25c6 !")
-                if self._auth_fail_count >= 2:
-                    self._auth_fail_count = 0
-                    cookie_str = _auto_detect_cookies()
-                    if cookie_str:
-                        with self._config_lock:
-                            if not self._set_secret_value(
-                                "cookie_str", cookie_str,
-                                "Could not refresh Claude cookies in Keychain",
-                            ):
-                                self._post_title("\u25c6 !")
-                                return
-                        self._warned_pcts.clear()
-                        log.info("Auth failed \u2014 auto-detected fresh cookies from browser")
-                        self._schedule_fetch()
-                    else:
-                        _notify(
-                            "AI Quota Bar",
-                            "Session expired \u2014 please update your cookie",
-                            "Click: Set Session Cookie\u2026 or Auto-detect from Browser",
-                        )
             else:
-                self._post_title("\u25c6 err")
+                self._auth_fail_count = 0
+
+            self._check_provider_warnings(self._provider_data)
+            self._cc_stats = fetch_claude_code_stats()
+
+            if snapshot.last_updated is not None:
+                data = snapshot.claude_data
+
+                # -- record usage history --
+                if data and data.session:
+                    _append_history(self._history, "claude", data.session.pct)
+                for prefix, pname in [("chatgpt", "ChatGPT"), ("cursor", "Cursor")]:
+                    pd = next((p for p in self._provider_data if p.name == pname), None)
+                    if pd and not pd.error:
+                        rows = getattr(pd, "_rows", None)
+                        if rows:
+                            for row in rows:
+                                hkey = f"{prefix}_{row.label.lower().replace(' ', '_')}"
+                                _append_history(self._history, hkey, row.pct)
+                copilot_pd = next(
+                    (pd for pd in self._provider_data if pd.name == "Copilot"), None,
+                )
+                if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
+                    _append_history(self._history, "copilot", copilot_pd.pct)
+                _save_history(self._history)
+
+                # -- record to SQLite history --
+                try:
+                    with self._db_lock:
+                        if data and data.session:
+                            _record_sample(self._history_db, "claude", data.session.pct)
+                        for prefix, pname in [("chatgpt", "ChatGPT"), ("cursor", "Cursor")]:
+                            pd = next((p for p in self._provider_data if p.name == pname), None)
+                            if pd and not pd.error:
+                                rows = getattr(pd, "_rows", None)
+                                if rows:
+                                    for row in rows:
+                                        hkey = f"{prefix}_{row.label.lower().replace(' ', '_')}"
+                                        _record_sample(self._history_db, hkey, row.pct)
+                        if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
+                            _record_sample(self._history_db, "copilot", copilot_pd.pct)
+                        self._history_db.commit()
+                        if time.time() - self._last_rollup > 3600:
+                            _rollup_daily_stats(self._history_db)
+                            self._last_rollup = time.time()
+                except Exception:
+                    log.exception("SQLite history recording failed")
+
+                self._check_pacing_alerts()
+
+            self._post_data(snapshot.claude_data)
+
+            if snapshot.claude_auth_failed and self._auth_fail_count >= 2:
+                self._auth_fail_count = 0
+                _warn_keychain_once()
+                detect_result = detect_cookies_with_helper("cookie_str")
+                if detect_result.status == "ok" and detect_result.cookie_str:
+                    with self._config_lock:
+                        if self._set_secret_value(
+                            "cookie_str",
+                            detect_result.cookie_str,
+                            "Could not refresh Claude cookies in Keychain",
+                        ):
+                            self._warned_pcts.clear()
+                            log.info(
+                                "Claude auth failed; refreshed browser cookies and scheduled retry",
+                            )
+                            self._schedule_fetch()
+                            return
+                _notify(
+                    "AI Quota Bar",
+                    "Claude session expired",
+                    "Open the gear menu and refresh Claude from your browser session.",
+                )
         except Exception:
             log.exception("fetch failed")
-            self._post_title("\u25c6 ?")
+            self._refresh_status = {
+                "Claude": self._make_refresh_status(
+                    "Claude",
+                    "fetch_failed",
+                    "Refresh failed unexpectedly.",
+                    configured=bool(self._last_data),
+                )
+            }
+            self._last_data = None
+            self._provider_data = []
+            self._last_updated = None
+            self._post_data(None)
         finally:
             self._fetching = False
 
@@ -2755,25 +3069,9 @@ class AIQuotaBarApp(rumps.App):
     # Priority order for the 2 bar slots (highest first)
     _BAR_PRIORITY = ["Claude", "ChatGPT", "Cursor", "Copilot"]
 
-    def _apply(self, data: UsageData):
-        primary = data.session or data.weekly_all or data.weekly_sonnet
-        if primary:
-            weekly_maxed = any(
-                r and r.pct >= CRIT_THRESHOLD
-                for r in [data.weekly_all, data.weekly_sonnet]
-            )
-            extra = " \u00b7" if (weekly_maxed and primary is data.session
-                             and primary.pct < CRIT_THRESHOLD) else ""
-
-            # Collect all available segments
-            available: dict[str, tuple[str, int, str]] = {}
-            available["Claude"] = ("Claude", primary.pct, extra)
-            for pd in self._provider_data:
-                bar_pct = self._provider_bar_pct(pd)
-                if bar_pct is not None:
-                    available[pd.name] = (pd.name, bar_pct, "")
-
-            # User-configured bar providers, or auto top 2 by priority
+    def _apply(self, data: UsageData | None):
+        available = _available_bar_segments(data, self._provider_data)
+        if available:
             chosen = self.config.get("bar_providers")
             if chosen:
                 segments = [available[n] for n in chosen if n in available]
@@ -2788,7 +3086,16 @@ class AIQuotaBarApp(rumps.App):
 
             self._set_bar_title(segments, cc_msgs=cc_msgs)
         else:
-            self.title = "\u25c6"
+            claude_state = self._refresh_status.get("Claude")
+            if claude_state and claude_state.state == "auth_failed":
+                self.title = "\u25c6 !"
+            elif any(
+                status.state in {"fetch_failed", "autodetect_failed"}
+                for status in self._refresh_status.values()
+            ):
+                self.title = "\u25c6 ?"
+            else:
+                self.title = "\u25c6"
         self._rebuild_menu(data)
         # Refresh the floating panel if it's currently visible
         try:
@@ -2797,8 +3104,8 @@ class AIQuotaBarApp(rumps.App):
         except Exception:
             log.debug("panel refresh in _apply failed", exc_info=True)
 
-    def _fetch_providers(self):
-        """Fetch all configured third-party API providers (sync, called from fetch thread)."""
+    def _fetch_providers(self) -> tuple[list[ProviderData], dict[str, ProviderRefreshStatus]]:
+        """Fetch configured providers and derive per-provider refresh status."""
         with self._config_lock:
             keys_snapshot = {
                 k: self._get_secret_value(
@@ -2806,24 +3113,81 @@ class AIQuotaBarApp(rumps.App):
                 )
                 for k in PROVIDER_REGISTRY
             }
+
+        statuses: dict[str, ProviderRefreshStatus] = {}
         tasks = []
         for cfg_key, (name, fetch_fn) in PROVIDER_REGISTRY.items():
             key = keys_snapshot.get(cfg_key)
             if key:
-                tasks.append((fetch_fn, key))
+                tasks.append((name, fetch_fn, key))
+            else:
+                summary = (
+                    f"{name} is not enabled yet."
+                    if cfg_key in COOKIE_PROVIDERS
+                    else f"{name} API key is not configured."
+                )
+                statuses[name] = self._make_refresh_status(
+                    name, "missing_credentials", summary, configured=False,
+                )
+
+        results: list[ProviderData] = []
+        by_name: dict[str, ProviderData] = {}
         if tasks:
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            results = []
+
             with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-                futures = {pool.submit(fn, k): (fn, k) for fn, k in tasks}
+                futures = {
+                    pool.submit(fetch_fn, key): name
+                    for name, fetch_fn, key in tasks
+                }
                 for future in as_completed(futures):
+                    name = futures[future]
                     try:
-                        results.append(future.result())
+                        pd = future.result()
+                        results.append(pd)
+                        by_name[name] = pd
                     except Exception:
-                        log.exception("provider fetch failed")
-            self._provider_data = results
-        else:
-            self._provider_data = []
+                        log.exception("provider fetch failed for %s", name)
+                        statuses[name] = self._make_refresh_status(
+                            name,
+                            "fetch_failed",
+                            f"{name} refresh failed.",
+                            configured=True,
+                        )
+
+        for cfg_key, (name, _fetch_fn) in PROVIDER_REGISTRY.items():
+            if name in statuses and statuses[name].configured is False:
+                continue
+            pd = by_name.get(name)
+            if pd is None:
+                statuses[name] = self._make_refresh_status(
+                    name,
+                    "fetch_failed",
+                    f"{name} refresh failed.",
+                    configured=True,
+                )
+                continue
+            if not pd.error:
+                statuses[name] = self._make_refresh_status(
+                    name, "ok", "Tracking normally.", configured=True, action="",
+                )
+                continue
+            lower = pd.error.lower()
+            state = (
+                "auth_failed"
+                if any(token in lower for token in (
+                    "not logged in", "unauthor", "forbidden", "401", "403", "session",
+                ))
+                else "fetch_failed"
+            )
+            statuses[name] = self._make_refresh_status(
+                name,
+                state,
+                pd.error[:80],
+                configured=True,
+            )
+
+        return results, statuses
 
     # -- callbacks ------------------------------------------------------------
 
