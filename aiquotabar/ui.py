@@ -1235,7 +1235,7 @@ class _SharePopover:
                 ),
             }
             text = NSAttributedString.alloc().initWithString_attributes_(
-                "AI Quota Bar  \u00b7  github.com/yagcioglutoprak/AIQuotaBar", attrs
+                "AI Quota Bar  \u00b7  github.com/mint5auce/AIQuotaBar-mint5auce", attrs
             )
             text.drawAtPoint_((8, 6))
 
@@ -1285,7 +1285,7 @@ class _SharePopover:
                 "https://x.com/intent/post?text="
                 + urllib.parse.quote(text)
                 + "&url="
-                + urllib.parse.quote("https://github.com/yagcioglutoprak/AIQuotaBar")
+                + urllib.parse.quote("https://github.com/mint5auce/AIQuotaBar-mint5auce")
             )
             subprocess.Popen(["open", url])
         except Exception:
@@ -2889,7 +2889,7 @@ class AIQuotaBarApp(rumps.App):
             log.exception("Failed to open history window")
 
     def _open_github(self, _sender):
-        subprocess.Popen(["open", "https://github.com/yagcioglutoprak/AIQuotaBar"])
+        subprocess.Popen(["open", "https://github.com/mint5auce/AIQuotaBar-mint5auce"])
 
     def _share_on_x(self, _sender):
         data = self._last_data
@@ -2900,13 +2900,13 @@ class AIQuotaBarApp(rumps.App):
                 f"I'm at {pct}% of my Claude session limit {icon}\n"
                 f"Tracking Claude + ChatGPT + Cursor usage live in my macOS menu bar "
                 f"\u2014 zero setup, auto-detects from browser\n"
-                f"github.com/yagcioglutoprak/AIQuotaBar"
+                f"github.com/mint5auce/AIQuotaBar-mint5auce"
             )
         else:
             text = (
                 "Track Claude + ChatGPT + Cursor usage live in your macOS menu bar "
                 "\u2014 zero setup, auto-detects from browser\n"
-                "github.com/yagcioglutoprak/AIQuotaBar"
+                "github.com/mint5auce/AIQuotaBar-mint5auce"
             )
         url = "https://x.com/intent/post?text=" + urllib.parse.quote(text)
         subprocess.Popen(["open", url])

@@ -1,6 +1,6 @@
 #!/bin/bash
 # AI Quota Bar — one-line installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/mint5auce/AIQuotaBar-mint5auce/main/install.sh | bash
 #
 # Builds a real macOS .app bundle (via py2app) and installs it to /Applications,
 # so the app appears as "AIQuotaBar" in the menu bar and System Settings —
@@ -8,7 +8,7 @@
 
 set -e
 
-REPO="https://github.com/yagcioglutoprak/AIQuotaBar"
+REPO="https://github.com/mint5auce/AIQuotaBar-mint5auce"
 SRC_DIR="$HOME/.ai-quota-bar"
 VENV_DIR="$SRC_DIR/.venv"
 APP_NAME="AIQuotaBar.app"
@@ -119,6 +119,6 @@ echo "  Manage in System Settings → General → Login Items."
 echo ""
 echo "  ─────────────────────────────────────────────────"
 echo "  ⭐ If you find this useful, star the repo!"
-echo "     https://github.com/yagcioglutoprak/AIQuotaBar"
+echo "     https://github.com/mint5auce/AIQuotaBar-mint5auce"
 echo "  ─────────────────────────────────────────────────"
 echo ""

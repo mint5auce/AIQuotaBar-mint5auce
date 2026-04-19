@@ -6,7 +6,7 @@ No Electron. No browser extension. One command to install.
 
 ## About this fork
 
-This fork keeps the original AI Quota Bar concept by Toprak Yagcioglu, with these differences from upstream:
+This fork keeps the original AI Quota Bar concept by [Toprak Yagcioglu](https://github.com/yagcioglutoprak), with these differences from upstream:
 
 - Ships as a real `AIQuotaBar.app` bundle (built with py2app) and uses the macOS Login Items API, instead of running a raw `python3` LaunchAgent.
 - Stores provider secrets in the macOS Keychain instead of plaintext config.
@@ -22,68 +22,12 @@ This fork keeps the original AI Quota Bar concept by Toprak Yagcioglu, with thes
 
 **One-line:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mint5auce/AIQuotaBar-mint5auce/main/install.sh | bash
 ```
 
 The installer builds a real `AIQuotaBar.app` bundle (via py2app), copies it to `/Applications`, ad-hoc codesigns it, and launches it. The app auto-detects your Claude, ChatGPT, Cursor, and Copilot sessions from Chrome, Arc, Brave, Edge, Firefox, or Safari — no copy-pasting cookies.
 
 Updates are manual: rerun the installer or pull the repo and rebuild yourself. The app does not self-update in the background.
-
----
-
-### Why I built this
-
-I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai doesn't show your usage until you hit the wall. Same with ChatGPT, Cursor, and Copilot. So I built a tiny menu bar app that shows them all.
-
----
-
-## What it shows
-
-| Menu bar | Meaning |
-|---|---|
-| 🟢 12% | Session usage is low — you're good |
-| 🟡 83% | Approaching the 5-hour limit |
-| 🔴 100% | Rate-limited — shows time until reset |
-| 🔴 100% · | Session is fine but weekly limit is maxed |
-
-Open the menu for full detail:
-
-```
-CLAUDE
-
-  🟢 Current Session
-  ██░░░░░░░░░░░░  12%
-  resets in 3h 41m
-
-  🟡 All Models
-  ████████████░░  83%
-  resets Wed 23:00
-
-  🟢 Sonnet Only
-  ███░░░░░░░░░░░  22%
-  resets Wed 23:00
-
-CHATGPT
-
-  🟢 Codex Tasks
-  █░░░░░░░░░░░░░  0%
-  resets Thu 05:38
-
-GITHUB COPILOT
-
-  0 / 300 this month
-  █░░░░░░░░░░░░░  0%
-
-CURSOR
-
-  🟢 Auto
-  █░░░░░░░░░░░░░  0%
-  resets in 27d
-
-  🟢 API
-  █░░░░░░░░░░░░░  0%
-  resets in 27d
-```
 
 ---
 
@@ -100,21 +44,6 @@ CURSOR
 - **Runs at login** — via LaunchAgent, toggle from the menu
 - **Tiny footprint** — single-file Python app, no Electron, no background services beyond the app itself
 
----
-
-## Why not just check the settings page?
-
-| | AI Quota Bar | Open settings page | Browser extension |
-|---|---|---|---|
-| Always visible | ✅ Menu bar | ❌ Manual tab switch | ⚠️ Badge only |
-| Notifications | ✅ 80% + 95% + pacing alerts | ❌ None | ⚠️ Varies |
-| Claude + ChatGPT + Cursor + Copilot | ✅ All in one place | ❌ One at a time | ❌ |
-| Privacy | ✅ Local only | ✅ | ⚠️ Depends on extension |
-| Install | ✅ One command | ✅ Nothing | ❌ Store + permissions |
-| No Electron | ✅ Single-file Python | ✅ | ❌ Often Electron |
-
----
-
 ## Requirements
 
 - macOS 13+ (uses the modern Login Items API)
@@ -128,8 +57,8 @@ CURSOR
 
 Set up a venv with the build + runtime dependencies:
 ```bash
-git clone https://github.com/yagcioglutoprak/AIQuotaBar.git
-cd AIQuotaBar
+git clone https://github.com/mint5auce/AIQuotaBar-mint5auce.git
+cd AIQuotaBar-mint5auce
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip setuptools
 .venv/bin/python -m pip install -r requirements.txt
@@ -223,25 +152,6 @@ Make sure you're logged into [claude.ai](https://claude.ai) in your browser, the
 
 **Session expired / showing ◆ !**
 The app will try to auto-detect fresh cookies from your browser. If that fails, click **Set Session Cookie…**.
-
----
-
-## Roadmap
-
-- [x] Cursor IDE usage tracking (Auto + API)
-- [x] GitHub Copilot premium request tracking
-- [x] Burn rate ETA + pacing alerts
-- [ ] Linux system tray support
-- [ ] Windows tray app
-- [ ] Customizable notification thresholds
-- [ ] Usage history graph
-- [ ] Multiple Claude account support
-
----
-
-## Contributing
-
-PRs welcome. Open an issue first for large changes. See [Manual install](#manual-install) for dev setup. Logs: `~/.aiquotabar.log`.
 
 ---
 
