@@ -5,6 +5,31 @@ from datetime import datetime, timedelta, timezone
 import aiquotabar.providers as providers
 
 
+class FixedDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        base = cls(2026, 4, 18, 12, 0, 0)
+        if tz is not None:
+            return base.replace(tzinfo=tz)
+        return base
+
+
+class FakeResponse:
+    def __init__(self, payload=None, *, raise_error=None, json_error=None):
+        self._payload = payload if payload is not None else {}
+        self._raise_error = raise_error
+        self._json_error = json_error
+
+    def raise_for_status(self):
+        if self._raise_error is not None:
+            raise self._raise_error
+
+    def json(self):
+        if self._json_error is not None:
+            raise self._json_error
+        return self._payload
+
+
 def test_parse_cookie_string_accepts_bare_session_key():
     assert providers.parse_cookie_string("abc123") == {"sessionKey": "abc123"}
 
@@ -176,3 +201,252 @@ def test_fetch_chatgpt_uses_token_and_parses_response(monkeypatch):
     assert captured["url"] == "https://chatgpt.com/backend-api/wham/usage"
     assert captured["headers"]["Authorization"] == "Bearer bearer-token"
     assert captured["cookies"] == {"__Secure-next-auth.session-token": "token"}
+
+
+def test_fetch_openai_returns_spend_limit_and_expected_billing_window(monkeypatch):
+    calls = []
+
+    def fake_api_get(url, headers, cookies=None):
+        calls.append((url, headers, cookies))
+        if url.endswith("/subscription"):
+            return {"hard_limit_usd": 25}
+        return {"total_usage": 1234}
+
+    monkeypatch.setattr(providers, "_api_get", fake_api_get)
+    monkeypatch.setattr(providers, "datetime", FixedDateTime)
+
+    data = providers.fetch_openai("sk-test")
+
+    assert data.name == "OpenAI"
+    assert data.spent == 12.34
+    assert data.limit == 25.0
+    assert data.currency == "USD"
+    assert data.period == "this month"
+    assert len(calls) == 2
+    assert calls[0][0] == "https://api.openai.com/v1/dashboard/billing/subscription"
+    assert calls[1][0] == (
+        "https://api.openai.com/v1/dashboard/billing/usage"
+        "?start_date=2026-04-01&end_date=2026-04-19"
+    )
+    assert calls[0][1]["Authorization"] == "Bearer sk-test"
+    assert calls[1][1]["Authorization"] == "Bearer sk-test"
+    assert calls[0][2] is None
+    assert calls[1][2] is None
+
+
+def test_fetch_openai_uses_system_limit_and_defaults_missing_usage(monkeypatch):
+    calls = []
+
+    def fake_api_get(url, headers, cookies=None):
+        calls.append(url)
+        if url.endswith("/subscription"):
+            return {"system_hard_limit_usd": 15}
+        return {}
+
+    monkeypatch.setattr(providers, "_api_get", fake_api_get)
+    monkeypatch.setattr(providers, "datetime", FixedDateTime)
+
+    data = providers.fetch_openai("sk-test")
+
+    assert data.limit == 15.0
+    assert data.spent == 0.0
+    assert len(calls) == 2
+
+
+def test_fetch_openai_returns_none_limit_when_hard_limit_is_zero(monkeypatch):
+    def fake_api_get(url, headers, cookies=None):
+        if url.endswith("/subscription"):
+            return {"hard_limit_usd": 0}
+        return {"total_usage": 500}
+
+    monkeypatch.setattr(providers, "_api_get", fake_api_get)
+    monkeypatch.setattr(providers, "datetime", FixedDateTime)
+
+    data = providers.fetch_openai("sk-test")
+
+    assert data.spent == 5.0
+    assert data.limit is None
+
+
+def test_fetch_openai_returns_truncated_error_when_api_call_fails(monkeypatch):
+    message = "x" * 120
+
+    def fake_api_get(url, headers, cookies=None):
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(providers, "_api_get", fake_api_get)
+
+    data = providers.fetch_openai("sk-test")
+
+    assert data.name == "OpenAI"
+    assert data.error == message[:80]
+
+
+def test_fetch_copilot_parses_response_and_strips_cf_cookies(monkeypatch):
+    captured = {}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return FakeResponse(
+            {"discountQuantity": 12, "userPremiumRequestEntitlement": 300}
+        )
+
+    monkeypatch.setattr(providers.requests, "get", fake_get)
+
+    data = providers.fetch_copilot(
+        "user_session=abc; logged_in=yes; cf_clearance=cf; __cf_bm=bm"
+    )
+
+    assert data.name == "Copilot"
+    assert data.spent == 12.0
+    assert data.limit == 300.0
+    assert data.currency == ""
+    assert data.period == "this month"
+    assert captured["url"] == "https://github.com/settings/billing/copilot_usage_card"
+    assert captured["kwargs"]["headers"]["Accept"] == "application/json"
+    assert (
+        captured["kwargs"]["headers"]["Referer"]
+        == "https://github.com/settings/billing/premium_requests_usage"
+    )
+    assert captured["kwargs"]["timeout"] == 10
+    assert captured["kwargs"]["impersonate"] == providers._IMPERSONATE
+    assert captured["kwargs"]["cookies"] == {
+        "user_session": "abc",
+        "logged_in": "yes",
+    }
+
+
+def test_fetch_copilot_defaults_missing_values_and_zero_limit(monkeypatch):
+    monkeypatch.setattr(providers.requests, "get", lambda *args, **kwargs: FakeResponse({}))
+
+    data = providers.fetch_copilot("user_session=abc")
+
+    assert data.spent == 0.0
+    assert data.limit is None
+
+
+def test_fetch_copilot_returns_error_from_http_or_json_failures(monkeypatch):
+    monkeypatch.setattr(
+        providers.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(raise_error=RuntimeError("request failed")),
+    )
+    http_data = providers.fetch_copilot("user_session=abc")
+    assert http_data.error == "request failed"
+
+    monkeypatch.setattr(
+        providers.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(json_error=RuntimeError("bad json")),
+    )
+    json_data = providers.fetch_copilot("user_session=abc")
+    assert json_data.error == "bad json"
+
+
+def test_fetch_cursor_parses_rows_and_request_metadata(monkeypatch):
+    captured = {}
+    future = (datetime.now(timezone.utc) + timedelta(days=3, hours=4)).isoformat()
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return FakeResponse(
+            {
+                "individualUsage": {
+                    "plan": {
+                        "autoPercentUsed": 12.6,
+                        "apiPercentUsed": 67.6,
+                        "totalPercentUsed": 45.5,
+                    }
+                },
+                "billingCycleEnd": future,
+            }
+        )
+
+    monkeypatch.setattr(providers.requests, "get", fake_get)
+
+    data = providers.fetch_cursor(
+        "WorkosCursorSessionToken=abc; cf_clearance=cf; __cf_bm=bm"
+    )
+
+    assert data.name == "Cursor"
+    assert data.spent == 46.0
+    assert data.limit == 100.0
+    assert data.currency == ""
+    assert [row.label for row in data._rows] == ["Auto", "API"]
+    assert [row.pct for row in data._rows] == [13, 68]
+    assert data._rows[0].reset_str
+    assert data._rows[1].reset_str == data._rows[0].reset_str
+    assert captured["url"] == "https://cursor.com/api/usage-summary"
+    assert captured["kwargs"]["headers"]["Accept"] == "application/json"
+    assert (
+        captured["kwargs"]["headers"]["Referer"]
+        == "https://cursor.com/dashboard?tab=usage"
+    )
+    assert captured["kwargs"]["timeout"] == 10
+    assert captured["kwargs"]["impersonate"] == providers._IMPERSONATE
+    assert captured["kwargs"]["cookies"] == {"WorkosCursorSessionToken": "abc"}
+
+
+def test_fetch_cursor_defaults_to_zeroes_when_plan_missing(monkeypatch):
+    monkeypatch.setattr(
+        providers.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse({"billingCycleEnd": None}),
+    )
+
+    data = providers.fetch_cursor("WorkosCursorSessionToken=abc")
+
+    assert data.error is None
+    assert data.spent == 0.0
+    assert data.limit == 100.0
+    assert [row.pct for row in data._rows] == [0, 0]
+    assert [row.reset_str for row in data._rows] == ["", ""]
+
+
+def test_fetch_cursor_ignores_invalid_or_past_billing_cycle_end(monkeypatch):
+    monkeypatch.setattr(
+        providers.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(
+            {
+                "individualUsage": {"plan": {"autoPercentUsed": 10, "apiPercentUsed": 20}},
+                "billingCycleEnd": "not-a-date",
+            }
+        ),
+    )
+    invalid = providers.fetch_cursor("WorkosCursorSessionToken=abc")
+    assert [row.reset_str for row in invalid._rows] == ["", ""]
+
+    past = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    monkeypatch.setattr(
+        providers.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(
+            {
+                "individualUsage": {"plan": {"autoPercentUsed": 10, "apiPercentUsed": 20}},
+                "billingCycleEnd": past,
+            }
+        ),
+    )
+    past_data = providers.fetch_cursor("WorkosCursorSessionToken=abc")
+    assert [row.reset_str for row in past_data._rows] == ["", ""]
+
+
+def test_fetch_cursor_returns_error_from_http_or_json_failures(monkeypatch):
+    monkeypatch.setattr(
+        providers.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(raise_error=RuntimeError("cursor failed")),
+    )
+    http_data = providers.fetch_cursor("WorkosCursorSessionToken=abc")
+    assert http_data.error == "cursor failed"
+
+    monkeypatch.setattr(
+        providers.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(json_error=RuntimeError("bad cursor json")),
+    )
+    json_data = providers.fetch_cursor("WorkosCursorSessionToken=abc")
+    assert json_data.error == "bad cursor json"

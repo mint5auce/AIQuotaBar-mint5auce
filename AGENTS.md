@@ -51,6 +51,20 @@ Basic validation:
 python3 -m py_compile claude_bar.py aiquotabar/*.py
 ```
 
+Pytest:
+
+```bash
+pytest -q
+```
+
+Post-change validation policy:
+
+- After every code change, run the relevant automated checks before finishing work.
+- For changes under `aiquotabar/*.py` or `claude_bar.py`, always run `python3 -m py_compile claude_bar.py aiquotabar/*.py`.
+- If the change touches existing tested behavior or any file under `tests/`, run `pytest -q` at minimum.
+- Prefer the smallest relevant pytest target while iterating, but before handing off a code change, run the full `pytest -q` suite.
+- If a change cannot be validated locally, say so explicitly and explain why.
+
 Logs:
 
 ```bash
