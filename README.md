@@ -6,7 +6,7 @@ No Electron. No browser extension. One command to install.
 
 ## About this fork
 
-This fork keeps the original AI Quota Bar concept by [Toprak Yagcioglu](https://github.com/yagcioglutoprak), with these differences from upstream:
+This fork keeps the original AI Quota Bar concept by [Toprak Yagcioglu](https://github.com/yagcioglutoprak), with these key simplifications and differences from upstream:
 
 - Ships as a real `AIQuotaBar.app` bundle (built with py2app) and uses the macOS Login Items API, instead of running a raw `python3` LaunchAgent.
 - Stores provider secrets in the macOS Keychain instead of plaintext config.
