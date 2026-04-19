@@ -2350,7 +2350,6 @@ class AIQuotaBarApp(rumps.App):
 
         # -- Actions ----------------------------------------------------------
         items.append(rumps.MenuItem("Refresh Now", callback=self._do_refresh))
-        items.append(rumps.MenuItem("Open claude.ai/settings/usage", callback=self._open_usage_page))
         items.append(None)
 
         # Status bar display submenu
@@ -3193,9 +3192,6 @@ class AIQuotaBarApp(rumps.App):
 
     def _do_refresh(self, _sender):
         self._schedule_fetch()
-
-    def _open_usage_page(self, _sender):
-        subprocess.Popen(["open", "https://claude.ai/settings/usage"])
 
     def _open_history_window(self, _sender):
         try:
