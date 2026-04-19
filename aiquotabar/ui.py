@@ -42,7 +42,14 @@ from aiquotabar.history import (
 )
 # -- Brand icon helpers --------------------------------------------------------
 
-_ICON_DIR   = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+def _resolve_icon_dir() -> str:
+    bundled = os.environ.get("RESOURCEPATH")
+    if bundled:
+        return os.path.join(bundled, "assets")
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+
+
+_ICON_DIR   = _resolve_icon_dir()
 _ICON_SIZE  = 14   # points -- matches menu bar font height
 _icon_cache: dict = {}
 
@@ -883,47 +890,54 @@ def _section_header_mi(title: str, icon_filename: str | None,
 
 
 # -- login item helpers --------------------------------------------------------
+# Uses macOS 13+ SMAppService so the app appears as "AIQuotaBar" under
+# System Settings → General → Login Items, instead of a "python3" LaunchAgent.
 
-def _module_root() -> str:
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_LEGACY_PLIST = os.path.expanduser("~/Library/LaunchAgents/com.aiquotabar.plist")
+
+
+def _cleanup_legacy_launchagent():
+    if not os.path.exists(_LEGACY_PLIST):
+        return
+    subprocess.run(["launchctl", "unload", _LEGACY_PLIST], capture_output=True)
+    try:
+        os.remove(_LEGACY_PLIST)
+    except OSError as e:
+        log.debug("legacy plist remove failed: %s", e)
+
+
+def _login_item_service():
+    from ServiceManagement import SMAppService
+    return SMAppService.mainAppService()
 
 
 def _is_login_item() -> bool:
     try:
-        result = subprocess.run(
-            ["osascript", "-e",
-             'tell application "System Events" to get the name of every login item'],
-            capture_output=True, text=True, timeout=10,
-        )
-        return "aiquotabar" in result.stdout.lower()
-    except Exception:
+        # SMAppServiceStatus: notRegistered=0, enabled=1, requiresApproval=2, notFound=3
+        return int(_login_item_service().status()) == 1
+    except Exception as e:
+        log.debug("_is_login_item: %s", e)
         return False
 
 
 def _add_login_item():
-    import plistlib
-    root = _module_root()
-    plist = os.path.expanduser("~/Library/LaunchAgents/com.aiquotabar.plist")
-    python_exe = sys.executable
-    plist_data = {
-        "Label": "com.aiquotabar",
-        "ProgramArguments": [python_exe, "-m", "aiquotabar"],
-        "WorkingDirectory": root,
-        "RunAtLoad": True,
-        "KeepAlive": False,
-    }
-    with open(plist, "wb") as f:
-        plistlib.dump(plist_data, f)
-    result = subprocess.run(["launchctl", "load", plist], capture_output=True)
-    if result.returncode != 0:
-        log.warning("launchctl load failed: %s", result.stderr.decode(errors="replace"))
+    _cleanup_legacy_launchagent()
+    try:
+        ok, err = _login_item_service().registerAndReturnError_(None)
+        if not ok:
+            log.warning("SMAppService register failed: %s", err)
+    except Exception as e:
+        log.warning("SMAppService register exception: %s", e)
 
 
 def _remove_login_item():
-    plist = os.path.expanduser("~/Library/LaunchAgents/com.aiquotabar.plist")
-    if os.path.exists(plist):
-        subprocess.run(["launchctl", "unload", plist], capture_output=True)
-        os.remove(plist)
+    _cleanup_legacy_launchagent()
+    try:
+        ok, err = _login_item_service().unregisterAndReturnError_(None)
+        if not ok:
+            log.warning("SMAppService unregister failed: %s", err)
+    except Exception as e:
+        log.warning("SMAppService unregister exception: %s", e)
 
 
 # -- native macOS dialogs via osascript ----------------------------------------

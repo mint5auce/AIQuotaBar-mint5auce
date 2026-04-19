@@ -551,77 +551,90 @@ def _warn_keychain_once():
     )
 
 
-# Script run in a child process — isolates browser_cookie3 C-library crashes
-# (libcrypto / sqlite segfaults on Chromium decryption don't kill the main app).
-_DETECT_SCRIPT = r"""
-import sys, json
+_BROWSERS = (
+    "firefox", "librewolf", "chrome", "arc", "brave",
+    "edge", "chromium", "opera", "vivaldi", "safari",
+)
 
-domain  = sys.argv[1]
-target  = sys.argv[2]
-allowed = set(json.loads(sys.argv[3]))
 
-BROWSERS = [
-    'firefox', 'librewolf', 'chrome', 'arc', 'brave',
-    'edge', 'chromium', 'opera', 'vivaldi', 'safari',
-]
+def _detect_cookies_worker(domain: str, target: str, allowed: list[str], queue) -> None:
+    """Run in a spawned child process. Isolates browser_cookie3 C-library
+    crashes (libcrypto / sqlite segfaults on Chromium decryption) from the
+    menu bar app. Posts the best cookie string (or None) onto `queue`.
 
-# Collect candidates from every browser that has the target cookie.
-# Pick the one with the latest expiry on the target cookie so we always
-# use the freshest session (handles the case where the user is logged in
-# to multiple browsers simultaneously).
-candidates = []  # list of (expires, cookie_str)
-
-try:
-    import browser_cookie3
-    for name in BROWSERS:
-        fn = getattr(browser_cookie3, name, None)
-        if fn is None:
-            continue
-        try:
-            jar = fn(domain_name=domain)
-            cookies = {x.name: x for x in jar}
-            if target not in cookies:
+    Picks the candidate with the latest `target` cookie expiry, tie-broken
+    by longest cookie string (richest jar) so we use the freshest session
+    when the user is logged into multiple browsers.
+    """
+    allowed_set = set(allowed)
+    candidates: list[tuple[int, str]] = []
+    try:
+        import browser_cookie3  # type: ignore
+        for name in _BROWSERS:
+            fn = getattr(browser_cookie3, name, None)
+            if fn is None:
                 continue
-            expires = cookies[target].expires or 0
-            selected = {
-                k: c.value for k, c in cookies.items()
-                if k in allowed
-            }
-            cookie_str = '; '.join(f'{k}={v}' for k, v in selected.items())
-            candidates.append((expires, cookie_str))
-        except Exception:
-            pass
-except Exception:
-    pass
+            try:
+                jar = fn(domain_name=domain)
+                cookies = {x.name: x for x in jar}
+                if target not in cookies:
+                    continue
+                expires = cookies[target].expires or 0
+                selected = {k: c.value for k, c in cookies.items() if k in allowed_set}
+                cookie_str = "; ".join(f"{k}={v}" for k, v in selected.items())
+                candidates.append((expires, cookie_str))
+            except Exception:
+                pass
+    except Exception:
+        pass
 
-# Best = latest expiry; tie-break by longest cookie string (richest jar)
-result = None
-if candidates:
-    candidates.sort(key=lambda x: (x[0], len(x[1])), reverse=True)
-    result = candidates[0][1]
-
-print(json.dumps(result))
-"""
+    result = None
+    if candidates:
+        candidates.sort(key=lambda x: (x[0], len(x[1])), reverse=True)
+        result = candidates[0][1]
+    try:
+        queue.put(result)
+    except Exception:
+        pass
 
 
 def _run_cookie_detection(domain: str, target_cookie: str, provider_key: str) -> str | None:
-    """Run browser_cookie3 in an isolated child process (crash-safe)."""
+    """Run browser_cookie3 in an isolated child process (crash-safe).
+
+    Uses multiprocessing 'spawn' (not 'fork') because rumps/PyObjC has
+    already initialized the AppKit run loop, and because the py2app bundle
+    doesn't ship a separately-invokable Python `-c` interpreter.
+    """
+    import multiprocessing as mp
+
+    allowlist = sorted(set(COOKIE_KEY_ALLOWLISTS.get(provider_key, ())) | {target_cookie})
     try:
-        allowlist = sorted(set(COOKIE_KEY_ALLOWLISTS.get(provider_key, ())) | {target_cookie})
-        r = subprocess.run(
-            [sys.executable, "-c", _DETECT_SCRIPT, domain, target_cookie, json.dumps(allowlist)],
-            capture_output=True, text=True, timeout=60,
+        ctx = mp.get_context("spawn")
+        queue = ctx.Queue()
+        proc = ctx.Process(
+            target=_detect_cookies_worker,
+            args=(domain, target_cookie, allowlist, queue),
         )
-        has_result = bool(r.stdout.strip())
+        proc.start()
+        proc.join(timeout=60)
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=5)
+            log.debug("cookie-detect domain=%s timed out", domain)
+            return None
+        result = None
+        try:
+            result = queue.get_nowait()
+        except Exception:
+            pass
         log.debug(
-            "cookie-detect domain=%s target=%s rc=%d found=%s",
-            domain, target_cookie, r.returncode, has_result,
+            "cookie-detect domain=%s target=%s rc=%s found=%s",
+            domain, target_cookie, proc.exitcode, result is not None,
         )
-        if r.stdout.strip():
-            return json.loads(r.stdout.strip())
+        return result
     except Exception as e:
         log.debug("_run_cookie_detection failed: %s", e)
-    return None
+        return None
 
 
 def _auto_detect_cookies() -> str | None:

@@ -4,30 +4,30 @@
 
 No Electron. No browser extension. One command to install.
 
-## Security Hardening
+## About this fork
 
-This fork keeps the original AI Quota Bar concept by Toprak Yagcioglu, but removes several risky behaviors from the upstream version: background self-update, logging of detected cookies, plaintext secret storage, and broad cookie collection. See the full [security review](security_best_practices_report.md).
+This fork keeps the original AI Quota Bar concept by Toprak Yagcioglu, with these differences from upstream:
+
+- Ships as a real `AIQuotaBar.app` bundle (built with py2app) and uses the macOS Login Items API, instead of running a raw `python3` LaunchAgent.
+- Stores provider secrets in the macOS Keychain instead of plaintext config.
+- Restricts browser cookie collection to a per-provider allowlist of the cookies actually needed.
+- Does not log detected cookies or session tokens.
+- No background self-update; updates happen when you rerun the installer or rebuild from source.
+- Distribution is via `install.sh` and source build only (no Homebrew tap).
 
 
 ---
 
 ## Install
 
-**One-line (recommended):**
+**One-line:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
 ```
 
-**Homebrew:**
-```bash
-brew tap yagcioglutoprak/aiquotabar
-brew install --HEAD aiquotabar
-aiquotabar &
-```
+The installer builds a real `AIQuotaBar.app` bundle (via py2app), copies it to `/Applications`, ad-hoc codesigns it, and launches it. The app auto-detects your Claude, ChatGPT, Cursor, and Copilot sessions from Chrome, Arc, Brave, Edge, Firefox, or Safari — no copy-pasting cookies.
 
-The app launches immediately and auto-detects your Claude, ChatGPT, Cursor, and Copilot sessions from Chrome, Arc, Brave, Edge, Firefox, or Safari — no copy-pasting cookies.
-
-Updates are manual: rerun the installer, use Homebrew, or pull the repo yourself. The app does not self-update in the background.
+Updates are manual: rerun the installer or pull the repo and rebuild yourself. The app does not self-update in the background.
 
 ---
 
@@ -117,25 +117,73 @@ CURSOR
 
 ## Requirements
 
-- macOS 12+
-- Python 3.10+
+- macOS 13+ (uses the modern Login Items API)
+- Python 3.10+ (build-time only — the installer ships a self-contained `AIQuotaBar.app`)
 - A paid account for any supported service (Claude, ChatGPT, Cursor, or Copilot)
 - Chrome, Arc, Brave, Edge, Firefox, or Safari with an active session
 
 ---
 
-## Manual install
+## Manual install / build from source
 
+Set up a venv with the build + runtime dependencies:
 ```bash
 git clone https://github.com/yagcioglutoprak/AIQuotaBar.git
 cd AIQuotaBar
-pip install -r requirements.txt
-python3 -m aiquotabar
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip setuptools
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-`requirements.txt` includes the PyObjC macOS framework bindings the native UI depends on, including Quartz.
+`requirements.txt` includes the PyObjC macOS framework bindings the native UI depends on (Quartz, ServiceManagement) and `py2app` for the bundle build.
 
-To upgrade later, rerun the install command, update via Homebrew, or pull the repo manually and reinstall dependencies.
+### Build the `.app` bundle
+
+**Dev iteration (alias mode — instant rebuild, edits live):**
+```bash
+.venv/bin/python setup.py py2app -A
+open dist/AIQuotaBar.app
+```
+Alias bundles symlink back to your source tree. Edit `aiquotabar/*.py`, quit the app, `open` it again — no rebuild needed.
+
+**Full standalone build (frozen, distributable):**
+```bash
+rm -rf build dist
+.venv/bin/python setup.py py2app
+open dist/AIQuotaBar.app
+```
+
+### Install to `/Applications`
+
+```bash
+osascript -e 'tell application "AIQuotaBar" to quit' 2>/dev/null
+rm -rf /Applications/AIQuotaBar.app
+cp -R dist/AIQuotaBar.app /Applications/
+codesign --force --deep --sign - /Applications/AIQuotaBar.app
+open /Applications/AIQuotaBar.app
+```
+
+(Ad-hoc `codesign` silences the unidentified-developer Gatekeeper prompt for the machine you built on.)
+
+### Run from source without bundling
+
+```bash
+.venv/bin/python -m aiquotabar
+```
+Works fine for development, but macOS will label it as a generic `python3` process — no proper app name in the menu bar or Login Items.
+
+### Tests
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+### Caveats
+
+- **macOS 13+ required** for the modern Login Items API (`SMAppService`).
+- **Alias-mode + Login Items**: if you toggle "Start at Login" while running an alias-mode build, the registration points at `dist/AIQuotaBar.app` in your source tree. Toggle it back off (or remove it from System Settings → General → Login Items) before swapping to a real install in `/Applications`.
+
+To upgrade later, rerun the install command or pull the repo manually and rebuild.
 
 ---
 
@@ -180,7 +228,6 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 
 ## Roadmap
 
-- [x] Homebrew tap (`brew tap yagcioglutoprak/aiquotabar && brew install --HEAD aiquotabar`)
 - [x] Cursor IDE usage tracking (Auto + API)
 - [x] GitHub Copilot premium request tracking
 - [x] Burn rate ETA + pacing alerts

@@ -81,3 +81,4 @@ Config and history are stored under the user home directory. The SQLite history 
 - If you touch notifications or refresh behavior, keep failure handling non-fatal so the menu bar app remains usable.
 - Use `AI Quota Bar` in human-facing copy and `aiquotabar` in machine-facing identifiers.
 - Update `README.md` only for real user-facing behavior changes.
+- Keep the small "About this fork" section near the top of `README.md` accurate when fork-vs-upstream behavior changes (packaging, secret handling, cookie scope, self-update, distribution channels). Keep it short — bullet list, not a narrative.
