@@ -15,7 +15,7 @@
 **Files:**
 - Create: `aiquotabar/__init__.py`
 - Create: `aiquotabar/config.py`
-- Modify: `claude_bar.py` (will become shim at end, but keep working for now)
+- Modify: `aiquotabar.py` (will become shim at end, but keep working for now)
 
 **Step 1: Create the package directory**
 
@@ -31,7 +31,7 @@ Empty file:
 
 **Step 3: Create `aiquotabar/config.py`**
 
-Extract from `claude_bar.py` lines 40-96 (constants) and lines 500-532 (config functions):
+Extract from `aiquotabar.py` lines 40-96 (constants) and lines 500-532 (config functions):
 
 ```python
 """Configuration constants and persistence."""
@@ -39,7 +39,7 @@ Extract from `claude_bar.py` lines 40-96 (constants) and lines 500-532 (config f
 import json
 import os
 
-CONFIG_FILE = os.path.expanduser("~/.claude_bar_config.json")
+CONFIG_FILE = os.path.expanduser("~/.aiquotabar_config.json")
 
 REFRESH_INTERVALS = {
     "1 min":  60,
@@ -65,13 +65,13 @@ NOTIF_DEFAULTS = {
 }
 
 # Usage history
-HISTORY_FILE = os.path.expanduser("~/.claude_bar_history.json")
+HISTORY_FILE = os.path.expanduser("~/.aiquotabar_history.json")
 HISTORY_MAX_AGE = 24 * 3600
 PACING_ALERT_MINUTES = 30
 
 # SQLite history
 HISTORY_DB = os.path.join(
-    os.path.expanduser("~/Library/Application Support/AIQuotaBar"),
+    os.path.expanduser("~/Library/Application Support/aiquotabar"),
     "history.db",
 )
 SAMPLES_MAX_DAYS = 7
@@ -91,7 +91,7 @@ HISTORY_COLORS = {
 import logging
 import logging.handlers
 
-LOG_FILE = os.path.expanduser("~/.claude_bar.log")
+LOG_FILE = os.path.expanduser("~/.aiquotabar.log")
 _log_handler = logging.handlers.RotatingFileHandler(
     LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3,
 )
@@ -142,7 +142,7 @@ Expected: `OK`
 
 ```bash
 git add aiquotabar/__init__.py aiquotabar/config.py
-git commit -m "refactor: extract config.py module from claude_bar.py"
+git commit -m "refactor: extract config.py module from aiquotabar.py"
 ```
 
 ---
@@ -154,7 +154,7 @@ git commit -m "refactor: extract config.py module from claude_bar.py"
 
 **Step 1: Create `aiquotabar/providers.py`**
 
-Extract from `claude_bar.py`:
+Extract from `aiquotabar.py`:
 - Lines 575-610: `LimitRow`, `UsageData`, `ProviderData` dataclasses
 - Lines 612-935: All fetch functions, cookie detection, parsing
 - Lines 940-972: `_fmt_reset` time helper
@@ -202,7 +202,7 @@ git commit -m "refactor: extract providers.py — all fetch functions and data m
 
 **Step 1: Create `aiquotabar/history.py`**
 
-Extract from `claude_bar.py`:
+Extract from `aiquotabar.py`:
 - Lines 104-109: `_nscolor` helper
 - Lines 112-244: JSON history functions (`_load_history`, `_save_history`, `_append_history`, `_calc_burn_rate`, `_calc_eta_minutes`, `_fmt_eta`, `_sparkline`)
 - Lines 247-497: SQLite history functions (`_init_history_db`, `_record_sample`, `_rollup_daily_stats`, `_get_weekly_stats`, `_get_week_limit_hits`, `_weekly_sparkline`, `_get_today_stats`, `_fetch_history_data`)
@@ -240,7 +240,7 @@ git commit -m "refactor: extract history.py — burn rate, sparklines, SQLite tr
 
 **Step 1: Create `aiquotabar/update.py`**
 
-Extract from `claude_bar.py`:
+Extract from `aiquotabar.py`:
 - Lines 535-572: `_check_and_apply_update`, `_restart_app`
 
 Imports:
@@ -264,21 +264,21 @@ git commit -m "refactor: extract update.py"
 
 ---
 
-### Task 5: Create `ui.py` — migrate existing ClaudeBar class
+### Task 5: Create `ui.py` — migrate existing AIQuotaBarApp class
 
 **Files:**
 - Create: `aiquotabar/ui.py`
 
 **Step 1: Create `aiquotabar/ui.py`**
 
-Move the remaining code from `claude_bar.py`:
+Move the remaining code from `aiquotabar.py`:
 - Lines 1009-1110: Icon helpers, `_BarToggleView`
 - Lines 1271-1464: Welcome window (`_show_welcome_window`)
 - Lines 1467-1883: History window (`_show_history_window`)
 - Lines 1886-2018: Display helpers (`_bar`, `_status_icon`, `_row_lines`, `_provider_lines`, `_mi`, `_colored_mi`, `_menu_icon`, `_section_header_mi`)
 - Lines 2021-2088: Login item helpers, dialog helpers (`_ask_text`, `_clipboard_text`, `_warn_keychain_once`)
 - Lines 2216-2244: `_notify`, `_show_text`
-- Lines 2246-3470: `ClaudeBar` class (entire)
+- Lines 2246-3470: `AIQuotaBarApp` class (entire)
 - Lines 1886-1898: `_bar`, `_status_icon`, `_fmt_count`
 
 Imports at top:
@@ -305,12 +305,12 @@ from aiquotabar.history import (
 from aiquotabar.update import _check_and_apply_update, _restart_app
 ```
 
-At this point `ui.py` should contain the ClaudeBar class and all UI helpers. The app should work identically to before.
+At this point `ui.py` should contain the AIQuotaBarApp class and all UI helpers. The app should work identically to before.
 
 **Step 2: Verify the app launches**
 
 ```bash
-python3 -c "from aiquotabar.ui import ClaudeBar; print('OK')"
+python3 -c "from aiquotabar.ui import AIQuotaBarApp; print('OK')"
 ```
 Expected: `OK`
 
@@ -318,47 +318,46 @@ Expected: `OK`
 
 ```bash
 git add aiquotabar/ui.py
-git commit -m "refactor: extract ui.py — ClaudeBar class and all UI components"
+git commit -m "refactor: extract ui.py — AIQuotaBarApp class and all UI components"
 ```
 
 ---
 
-### Task 6: Wire up `__main__.py` and convert `claude_bar.py` to shim
+### Task 6: Wire up `__main__.py` and convert `aiquotabar.py` to shim
 
 **Files:**
 - Create: `aiquotabar/__main__.py`
-- Modify: `claude_bar.py` (replace 3545 lines with 8-line shim)
+- Modify: `aiquotabar.py` (replace 3545 lines with 8-line shim)
 
 **Step 1: Create `aiquotabar/__main__.py`**
 
 ```python
-"""AIQuotaBar entry point."""
+"""AI Quota Bar entry point."""
 
 import sys
 from aiquotabar.history import cli_history
-from aiquotabar.ui import ClaudeBar
+from aiquotabar.ui import AIQuotaBarApp
 
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ("--history", "-H"):
         cli_history()
     else:
-        ClaudeBar().run()
+        AIQuotaBarApp().run()
 
 
 if __name__ == "__main__":
     main()
 ```
 
-**Step 2: Replace `claude_bar.py` with a shim**
+**Step 2: Replace `aiquotabar.py` with a shim**
 
 ```python
 #!/usr/bin/env python3
-"""AIQuotaBar — backwards-compatible entry point.
+"""AI Quota Bar entry point.
 
 The real code lives in the aiquotabar/ package.
-This shim keeps `python3 claude_bar.py` working for
-install.sh, LaunchAgent, and existing users.
+
 """
 from aiquotabar.__main__ import main
 
@@ -369,23 +368,23 @@ if __name__ == "__main__":
 **Step 3: Verify the app launches both ways**
 
 ```bash
-python3 claude_bar.py --history 2>/dev/null; echo "shim OK"
+python3 aiquotabar.py --history 2>/dev/null; echo "shim OK"
 python3 -m aiquotabar --history 2>/dev/null; echo "package OK"
 ```
 
-**Step 4: Verify install.sh still references `claude_bar.py` correctly**
+**Step 4: Verify install.sh still references `aiquotabar.py` correctly**
 
-The plist in `install.sh` line 78 points to `$INSTALL_DIR/claude_bar.py` — this still works because the shim imports from the package. No changes needed.
+The plist in `install.sh` line 78 points to `$INSTALL_DIR/aiquotabar.py` — this still works because the shim imports from the package. No changes needed.
 
 **Step 5: Commit**
 
 ```bash
-git add aiquotabar/__main__.py claude_bar.py
-git commit -m "refactor: complete code split — claude_bar.py is now a shim
+git add aiquotabar/__main__.py aiquotabar.py
+git commit -m "refactor: complete code split — aiquotabar.py is now a shim
 
 The 3545-line single file is split into 6 modules:
   config.py, providers.py, history.py, update.py, ui.py
-claude_bar.py remains as a thin shim for backwards compatibility."
+aiquotabar.py remains as a thin shim for backwards compatibility."
 ```
 
 ---
@@ -429,7 +428,7 @@ class _UsagePanel:
     """Custom floating panel that replaces the NSMenu dropdown."""
 
     def __init__(self, app):
-        self.app = app          # reference to ClaudeBar
+        self.app = app          # reference to AIQuotaBarApp
         self._panel = None
         self._content = None    # the scrollable content view
         self._visible = False
@@ -561,7 +560,7 @@ class _UsagePanel:
             parent.addSubview_(fill)
 
     def _add_header(self, parent, w, panel_h):
-        """Title bar with 'AIQuotaBar' + share + gear buttons."""
+        """Title bar with 'AI Quota Bar' + share + gear buttons."""
         ...
 
     def _add_footer(self, parent, w, panel_h):
@@ -569,9 +568,9 @@ class _UsagePanel:
         ...
 ```
 
-**Step 2: Wire the panel into ClaudeBar**
+**Step 2: Wire the panel into AIQuotaBarApp**
 
-In `ClaudeBar.__init__`, create the panel:
+In `AIQuotaBarApp.__init__`, create the panel:
 ```python
 self._panel = _UsagePanel(self)
 ```
@@ -631,7 +630,7 @@ def _apply(self, data):
 **Step 5: Test manually**
 
 ```bash
-pkill -f claude_bar.py; sleep 1; python3 claude_bar.py &
+pkill -f aiquotabar.py; sleep 1; python3 aiquotabar.py &
 ```
 
 Click the menu bar icon. The floating panel should appear with vibrancy blur, real progress bars, and brand colors. Click outside to dismiss.
@@ -741,7 +740,7 @@ class _SharePopover:
         view.unlockFocus()
 
         # Add watermark text at bottom
-        # ... draw "AIQuotaBar - github.com/yagcioglutoprak/AIQuotaBar" ...
+        # ... draw "AI Quota Bar - github.com/yagcioglutoprak/AIQuotaBar" ...
 
         png_data = rep.representationUsingType_properties_(NSPNGFileType, {})
         pb = NSPasteboard.generalPasteboard()
@@ -775,7 +774,7 @@ class _SharePopover:
                     parts.append(f"Cursor {worst}%")
 
         stats = " / ".join(parts) if parts else "my AI usage"
-        text = f"{stats} -- tracking with AIQuotaBar"
+        text = f"{stats} -- tracking with AI Quota Bar"
         url = (
             "https://x.com/intent/post?text="
             + urllib.parse.quote(text)
@@ -807,7 +806,7 @@ git commit -m "feat: share — copy panel as image or post to X with usage stats
 
 **Files:**
 - Modify: `aiquotabar/ui.py`
-- Modify: `claude_bar.py` (ensure shim is minimal)
+- Modify: `aiquotabar.py` (ensure shim is minimal)
 
 **Step 1: Panel dismiss on click-outside and Esc**
 
@@ -842,7 +841,7 @@ NSAnimationContext.runAnimationGroup_(
 **Step 3: Verify all features work end-to-end**
 
 ```bash
-pkill -f claude_bar.py; sleep 1; python3 claude_bar.py &
+pkill -f aiquotabar.py; sleep 1; python3 aiquotabar.py &
 ```
 
 Test checklist:
@@ -854,9 +853,9 @@ Test checklist:
 - [ ] Gear icon -> settings popover with all options
 - [ ] Share -> Copy Image works
 - [ ] Share -> Post to X opens browser
-- [ ] `python3 claude_bar.py` works (shim)
+- [ ] `python3 aiquotabar.py` works (shim)
 - [ ] `python3 -m aiquotabar` works (package)
-- [ ] `python3 claude_bar.py --history` works (CLI)
+- [ ] `python3 aiquotabar.py --history` works (CLI)
 - [ ] Notifications still fire at 80%/95%
 - [ ] Auto-update still works
 - [ ] Widget cache still writes

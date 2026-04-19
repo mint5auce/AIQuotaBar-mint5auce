@@ -1,5 +1,5 @@
 class Aiquotabar < Formula
-  desc "macOS menu bar app showing live Claude.ai and ChatGPT usage limits"
+  desc "AI Quota Bar is a macOS menu bar app showing live multi-provider usage limits"
   homepage "https://github.com/yagcioglutoprak/AIQuotaBar"
   url "https://github.com/yagcioglutoprak/AIQuotaBar/archive/refs/tags/v1.1.0.tar.gz"
   sha256 "9c875f01e4891e4483640abcf1447e172dcf66ddfc49f46df91187ea19c4f5ff"
@@ -102,7 +102,7 @@ class Aiquotabar < Formula
       end
     end
 
-    libexec.install "claude_bar.py"
+    libexec.install "aiquotabar.py"
     (libexec/"assets").install Dir["assets/*"]
 
     # Fix rumps notification crash (requires CFBundleIdentifier in Info.plist)
@@ -114,23 +114,23 @@ class Aiquotabar < Formula
 
     (bin/"aiquotabar").write <<~SH
       #!/bin/bash
-      exec "#{venv}/bin/python" "#{libexec}/claude_bar.py" "$@"
+      exec "#{venv}/bin/python" "#{libexec}/aiquotabar.py" "$@"
     SH
     chmod 0755, bin/"aiquotabar"
   end
 
   def caveats
     <<~EOS
-      AIQuotaBar is a macOS menu bar app. Launch it with:
+      AI Quota Bar is a macOS menu bar app. Launch it with:
         aiquotabar &
 
       To run it at login, click the ◆ icon in your menu bar → Launch at Login.
 
-      Logs are written to: ~/.claude_bar.log
+      Logs are written to: ~/.aiquotabar.log
     EOS
   end
 
   test do
-    system "#{libexec}/venv/bin/python", "-m", "py_compile", "#{libexec}/claude_bar.py"
+    system "#{libexec}/venv/bin/python", "-m", "py_compile", "#{libexec}/aiquotabar.py"
   end
 end

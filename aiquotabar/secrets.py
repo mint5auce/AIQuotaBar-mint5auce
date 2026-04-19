@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from aiquotabar.config import log, save_config
 
-SERVICE_NAME = "AIQuotaBar"
+SERVICE_NAME = "AI Quota Bar"
 SECRET_KEYS = frozenset({
     "cookie_str",
     "chatgpt_cookies",

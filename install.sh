@@ -1,5 +1,5 @@
 #!/bin/bash
-# AIQuotaBar — one-line installer
+# AI Quota Bar — one-line installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
 
 set -e
@@ -7,10 +7,10 @@ set -e
 REPO="https://github.com/yagcioglutoprak/AIQuotaBar"
 INSTALL_DIR="$HOME/.ai-quota-bar"
 VENV_DIR="$INSTALL_DIR/.venv"
-PLIST="$HOME/Library/LaunchAgents/com.claudebar.plist"
+PLIST="$HOME/Library/LaunchAgents/com.aiquotabar.plist"
 
 echo ""
-echo "  AIQuotaBar — installer"
+echo "  AI Quota Bar — installer"
 echo "  ──────────────────────"
 echo ""
 
@@ -71,20 +71,20 @@ cat > "$PLIST" <<PLIST_EOF
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.claudebar</string>
+    <string>com.aiquotabar</string>
     <key>ProgramArguments</key>
     <array>
         <string>$PYTHON</string>
-        <string>$INSTALL_DIR/claude_bar.py</string>
+        <string>$INSTALL_DIR/aiquotabar.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>$HOME/.claude_bar.log</string>
+    <string>$HOME/.aiquotabar.log</string>
     <key>StandardErrorPath</key>
-    <string>$HOME/.claude_bar.log</string>
+    <string>$HOME/.aiquotabar.log</string>
 </dict>
 </plist>
 PLIST_EOF
@@ -95,9 +95,9 @@ launchctl bootstrap gui/$(id -u) "$PLIST"
 echo "  ✓  Added to Login Items (runs at every login)"
 
 # ── 6. Launch now ─────────────────────────────────────────────────────────────
-pkill -f "$INSTALL_DIR/claude_bar.py" 2>/dev/null || true
+pkill -f "$INSTALL_DIR/aiquotabar.py" 2>/dev/null || true
 sleep 1
-"$PYTHON" "$INSTALL_DIR/claude_bar.py" &>/dev/null &
+"$PYTHON" "$INSTALL_DIR/aiquotabar.py" &>/dev/null &
 echo "  ✓  Launched!"
 echo ""
 echo "  Look for the ◆ icon in your menu bar."

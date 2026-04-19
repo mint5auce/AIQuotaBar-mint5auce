@@ -1,4 +1,4 @@
-# AIQuotaBar
+# AI Quota Bar
 
 **Stop getting rate-limited by surprise.** See your Claude, ChatGPT, Cursor, and Copilot usage live in the macOS menu bar.
 
@@ -6,7 +6,7 @@ No Electron. No browser extension. One command to install.
 
 ## Security Hardening
 
-This fork keeps the original AIQuotaBar concept by Toprak Yagcioglu, but removes several risky behaviors from the upstream version: background self-update, logging of detected cookies, plaintext secret storage, and broad cookie collection. See the full [security review](security_best_practices_report.md).
+This fork keeps the original AI Quota Bar concept by Toprak Yagcioglu, but removes several risky behaviors from the upstream version: background self-update, logging of detected cookies, plaintext secret storage, and broad cookie collection. See the full [security review](security_best_practices_report.md).
 
 
 ---
@@ -104,7 +104,7 @@ CURSOR
 
 ## Why not just check the settings page?
 
-| | AIQuotaBar | Open settings page | Browser extension |
+| | AI Quota Bar | Open settings page | Browser extension |
 |---|---|---|---|
 | Always visible | ✅ Menu bar | ❌ Manual tab switch | ⚠️ Badge only |
 | Notifications | ✅ 80% + 95% + pacing alerts | ❌ None | ⚠️ Varies |
@@ -130,7 +130,7 @@ CURSOR
 git clone https://github.com/yagcioglutoprak/AIQuotaBar.git
 cd AIQuotaBar
 pip install -r requirements.txt
-python3 claude_bar.py
+python3 aiquotabar.py
 ```
 
 To upgrade later, rerun the install command, update via Homebrew, or pull the repo manually and reinstall dependencies.
@@ -165,7 +165,7 @@ Claude cookies auto-detect on startup. ChatGPT, Copilot, and Cursor cookies are 
 
 **App doesn't appear in menu bar**
 ```bash
-tail -50 ~/.claude_bar.log
+tail -50 ~/.aiquotabar.log
 ```
 
 **Cookies not detected**
@@ -192,7 +192,7 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 
 ## Contributing
 
-PRs welcome. Open an issue first for large changes. See [Manual install](#manual-install) for dev setup. Logs: `~/.claude_bar.log`.
+PRs welcome. Open an issue first for large changes. See [Manual install](#manual-install) for dev setup. Logs: `~/.aiquotabar.log`.
 
 ---
 

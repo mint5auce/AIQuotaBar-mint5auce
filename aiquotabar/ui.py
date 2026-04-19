@@ -253,7 +253,7 @@ def _show_welcome_window() -> None:
     t = NSTextField.alloc().initWithFrame_(
         NSMakeRect(PAD, y_top, WIN_W - PAD * 2, 28)
     )
-    t.setStringValue_("Welcome to AIQuotaBar")
+    t.setStringValue_("Welcome to AI Quota Bar")
     t.setBezeled_(False)
     t.setDrawsBackground_(False)
     t.setEditable_(False)
@@ -262,7 +262,7 @@ def _show_welcome_window() -> None:
     t.setFont_(NSFont.systemFontOfSize_weight_(20, 0.56))
     content.addSubview_(t)
 
-    _label("Monitor your Claude and ChatGPT usage limits in real time.",
+    _label("Monitor your AI provider usage limits in real time.",
            PAD, y_top - 22, WIN_W - PAD * 2, size=12)
 
     # -- Demo GIF --
@@ -885,7 +885,7 @@ def _section_header_mi(title: str, icon_filename: str | None,
 # -- login item helpers --------------------------------------------------------
 
 def _script_path() -> str:
-    return os.path.abspath(__file__)
+    return os.path.abspath(sys.argv[0])
 
 
 def _is_login_item() -> bool:
@@ -895,7 +895,7 @@ def _is_login_item() -> bool:
              'tell application "System Events" to get the name of every login item'],
             capture_output=True, text=True, timeout=10,
         )
-        return "claude_bar" in result.stdout.lower()
+        return "aiquotabar" in result.stdout.lower()
     except Exception:
         return False
 
@@ -903,10 +903,10 @@ def _is_login_item() -> bool:
 def _add_login_item():
     import plistlib
     path = _script_path()
-    plist = os.path.expanduser("~/Library/LaunchAgents/com.claudebar.plist")
+    plist = os.path.expanduser("~/Library/LaunchAgents/com.aiquotabar.plist")
     python_exe = sys.executable
     plist_data = {
-        "Label": "com.claudebar",
+        "Label": "com.aiquotabar",
         "ProgramArguments": [python_exe, path],
         "RunAtLoad": True,
         "KeepAlive": False,
@@ -919,7 +919,7 @@ def _add_login_item():
 
 
 def _remove_login_item():
-    plist = os.path.expanduser("~/Library/LaunchAgents/com.claudebar.plist")
+    plist = os.path.expanduser("~/Library/LaunchAgents/com.aiquotabar.plist")
     if os.path.exists(plist):
         subprocess.run(["launchctl", "unload", plist], capture_output=True)
         os.remove(plist)
@@ -1121,7 +1121,7 @@ def _ensure_panel_classes():
 class _SharePopover:
     """Two-option share menu: Copy Image or Share on X."""
 
-    def __init__(self, app: "ClaudeBar"):
+    def __init__(self, app: "AIQuotaBarApp"):
         self.app = app
 
     def show(self, sender):
@@ -1220,7 +1220,7 @@ class _SharePopover:
                 ),
             }
             text = NSAttributedString.alloc().initWithString_attributes_(
-                "AIQuotaBar  \u00b7  github.com/yagcioglutoprak/AIQuotaBar", attrs
+                "AI Quota Bar  \u00b7  github.com/yagcioglutoprak/AIQuotaBar", attrs
             )
             text.drawAtPoint_((8, 6))
 
@@ -1243,7 +1243,7 @@ class _SharePopover:
             pb.setData_forType_(png_data, "public.png")
 
             log.info("Panel screenshot copied to clipboard")
-            _notify("AIQuotaBar", "Copied!", "Panel screenshot copied to clipboard")
+            _notify("AI Quota Bar", "Copied!", "Panel screenshot copied to clipboard")
         except Exception:
             log.debug("_SharePopover.copy_image failed", exc_info=True)
 
@@ -1265,7 +1265,7 @@ class _SharePopover:
                     parts.append(f"{pd.name} {pd.pct}%")
 
             stats = " \u00b7 ".join(parts) if parts else "my AI usage"
-            text = f"{stats} \u2014 tracking with AIQuotaBar"
+            text = f"{stats} \u2014 tracking with AI Quota Bar"
             url = (
                 "https://x.com/intent/post?text="
                 + urllib.parse.quote(text)
@@ -1289,7 +1289,7 @@ class _UsagePanel:
     SECTION_GAP = 12
     ROW_GAP = 4
 
-    def __init__(self, app: "ClaudeBar"):
+    def __init__(self, app: "AIQuotaBarApp"):
         self._app = app
         self._panel = None           # NSPanel instance
         self._visible = False
@@ -1717,10 +1717,10 @@ class _UsagePanel:
 
     def _render_header(self, parent, x, y, w, h, NSTextField, NSFont,
                        NSColor, NSButton, NSMakeRect, NSTextAlignmentLeft):
-        """Render: 'AIQuotaBar' title + gear + share buttons."""
+        """Render: 'AI Quota Bar' title + gear + share buttons."""
         # Title
         title = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, w - 60, h))
-        title.setStringValue_("AIQuotaBar")
+        title.setStringValue_("AI Quota Bar")
         title.setBezeled_(False)
         title.setDrawsBackground_(False)
         title.setEditable_(False)
@@ -1896,7 +1896,7 @@ class _UsagePanel:
 
 # -- app -----------------------------------------------------------------------
 
-class ClaudeBar(rumps.App):
+class AIQuotaBarApp(rumps.App):
     def __init__(self):
         super().__init__("\u25c6", quit_button=None)
         self.config = load_config()
@@ -1968,7 +1968,7 @@ class ClaudeBar(rumps.App):
             return
         self._last_secret_store_error = now
         _notify(
-            "AIQuotaBar",
+            "AI Quota Bar",
             "Could not access macOS Keychain",
             f"{action}. Unlock Keychain Access and try again.",
         )
@@ -2414,7 +2414,7 @@ class ClaudeBar(rumps.App):
             else:
                 # Fallback to notification if GIF missing
                 rumps.notification(
-                    title="Welcome to AIQuotaBar",
+                    title="Welcome to AI Quota Bar",
                     subtitle="Monitoring Claude + ChatGPT usage",
                     message="Click the diamond in your menu bar to get started.",
                     sound=True,
@@ -2424,7 +2424,7 @@ class ClaudeBar(rumps.App):
         else:
             # Subsequent launches -- brief notification
             rumps.notification(
-                title="AIQuotaBar",
+                title="AI Quota Bar",
                 subtitle="Running",
                 message="Tracking usage from your menu bar.",
                 sound=False,
@@ -2545,7 +2545,7 @@ class ClaudeBar(rumps.App):
                         self._schedule_fetch()
                     else:
                         _notify(
-                            "Claude Usage Bar",
+                            "AI Quota Bar",
                             "Session expired \u2014 please update your cookie",
                             "Click: Set Session Cookie\u2026 or Auto-detect from Browser",
                         )
@@ -2581,7 +2581,7 @@ class ClaudeBar(rumps.App):
                 self._warned_pcts.discard(warn_key)
                 self._warned_pcts.discard(crit_key)
                 _notify(
-                    "Claude Usage Bar \u2705",
+                    "AI Quota Bar \u2705",
                     f"{row.label} has reset!",
                     f"Now at {row.pct}% \u2014 you're good to go.",
                 )
@@ -2590,14 +2590,14 @@ class ClaudeBar(rumps.App):
                 if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
                     self._warned_pcts.add(crit_key)
                     _notify(
-                        "Claude Usage Bar \U0001f534",
+                        "AI Quota Bar \U0001f534",
                         f"{row.label} is at {row.pct}%!",
                         row.reset_str or "Limit almost reached",
                     )
                 elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
                     self._warned_pcts.add(warn_key)
                     _notify(
-                        "Claude Usage Bar \U0001f7e1",
+                        "AI Quota Bar \U0001f7e1",
                         f"{row.label} is at {row.pct}%",
                         row.reset_str or "Approaching limit",
                     )
@@ -2634,7 +2634,7 @@ class ClaudeBar(rumps.App):
                     self._warned_pcts.discard(warn_key)
                     self._warned_pcts.discard(crit_key)
                     _notify(
-                        "Claude Usage Bar \u2705",
+                        "AI Quota Bar \u2705",
                         f"{pname} {row.label} has reset!",
                         f"Now at {row.pct}% \u2014 you're good to go.",
                     )
@@ -2643,14 +2643,14 @@ class ClaudeBar(rumps.App):
                     if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
                         self._warned_pcts.add(crit_key)
                         _notify(
-                            "Claude Usage Bar \U0001f534",
+                            "AI Quota Bar \U0001f534",
                             f"{pname} {row.label} is at {row.pct}%!",
                             row.reset_str or "Limit almost reached",
                         )
                     elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
                         self._warned_pcts.add(warn_key)
                         _notify(
-                            "Claude Usage Bar \U0001f7e1",
+                            "AI Quota Bar \U0001f7e1",
                             f"{pname} {row.label} is at {row.pct}%",
                             row.reset_str or "Approaching limit",
                         )
@@ -2687,7 +2687,7 @@ class ClaudeBar(rumps.App):
                 if hkey not in self._pacing_alerted:
                     self._pacing_alerted.add(hkey)
                     _notify(
-                        "Claude Usage Bar \u23f1",
+                        "AI Quota Bar \u23f1",
                         f"Slow down \u2014 {label} limit in ~{_fmt_eta(eta)}",
                         "At your current pace you'll hit the cap soon.",
                     )
@@ -2910,10 +2910,10 @@ class ClaudeBar(rumps.App):
                             f"Could not save {name} cookies to Keychain",
                         ):
                             return
-                        _notify("Claude Usage Bar", f"{name} cookies updated \u2713", "Fetching usage\u2026")
+                        _notify("AI Quota Bar", f"{name} cookies updated \u2713", "Fetching usage\u2026")
                         self._schedule_fetch()
                     else:
-                        _notify("Claude Usage Bar", f"Could not find {name} session",
+                        _notify("AI Quota Bar", f"Could not find {name} session",
                                 f"Make sure you are logged into {name} in your browser.")
                 return
             # API key-based
@@ -2921,7 +2921,7 @@ class ClaudeBar(rumps.App):
                 cfg_key, f"Could not read saved {name} API key from Keychain"
             ) or ""
             key = _ask_text(
-                title=f"Claude Usage Bar \u2014 {name}",
+                title=f"AI Quota Bar \u2014 {name}",
                 prompt=f"Paste your {name} API key.\nLeave blank to remove.",
                 default=current,
             )
@@ -3103,7 +3103,7 @@ class ClaudeBar(rumps.App):
             normalized = minimize_cookie_string("cookie_str", key.strip())
             if not normalized:
                 _notify(
-                    "Claude Usage Bar",
+                    "AI Quota Bar",
                     "No supported Claude cookies found",
                     "Paste cookies that include sessionKey and lastActiveOrg.",
                 )
@@ -3121,7 +3121,7 @@ class ClaudeBar(rumps.App):
         text = _clipboard_text()
         if not text or ("sessionKey" not in text and "=" not in text):
             _notify(
-                "Claude Usage Bar",
+                "AI Quota Bar",
                 "Nothing useful in clipboard",
                 "Copy your cookie string from Chrome DevTools first.",
             )
@@ -3129,7 +3129,7 @@ class ClaudeBar(rumps.App):
         normalized = minimize_cookie_string("cookie_str", text)
         if not normalized:
             _notify(
-                "Claude Usage Bar",
+                "AI Quota Bar",
                 "No supported Claude cookies found",
                 "Copy the cookie header from claude.ai first.",
             )
@@ -3143,7 +3143,7 @@ class ClaudeBar(rumps.App):
         self._auth_fail_count = 0
         self._schedule_fetch()
         _notify(
-            "Claude Usage Bar",
+            "AI Quota Bar",
             "Cookie updated from clipboard \u2713",
             "Fetching usage data\u2026",
         )
@@ -3157,12 +3157,12 @@ class ClaudeBar(rumps.App):
             _remove_login_item()
             self._login_item_cached = False
             sender._menuitem.setState_(0)
-            _notify("Claude Usage Bar", "Removed from Login Items", "")
+            _notify("AI Quota Bar", "Removed from Login Items", "")
         else:
             _add_login_item()
             self._login_item_cached = True
             sender._menuitem.setState_(1)
-            _notify("Claude Usage Bar", "Added to Login Items", "Will launch automatically on login")
+            _notify("AI Quota Bar", "Added to Login Items", "Will launch automatically on login")
 
     def _try_auto_detect(self):
         """Background: silently try to grab cookies from the browser on first run."""
@@ -3174,7 +3174,7 @@ class ClaudeBar(rumps.App):
             ):
                 return
             _notify(
-                "Claude Usage Bar",
+                "AI Quota Bar",
                 "Cookies auto-detected from your browser \u2713",
                 "Fetching usage data\u2026",
             )
@@ -3184,7 +3184,7 @@ class ClaudeBar(rumps.App):
         """Menu item: manually trigger auto-detect (runs in background thread)."""
         if not _BROWSER_COOKIE3_OK:
             _notify(
-                "Claude Usage Bar",
+                "AI Quota Bar",
                 "browser-cookie3 not installed",
                 "Run: pip install browser-cookie3",
             )
@@ -3209,11 +3209,11 @@ class ClaudeBar(rumps.App):
                     return
             self._warned_pcts.clear()
             self._auth_fail_count = 0
-            _notify("Claude Usage Bar", "Cookies auto-detected \u2713", "Fetching usage data\u2026")
+            _notify("AI Quota Bar", "Cookies auto-detected \u2713", "Fetching usage data\u2026")
             self._schedule_fetch()
         else:
             _notify(
-                "Claude Usage Bar",
+                "AI Quota Bar",
                 "Could not find claude.ai session in any browser",
                 "Make sure you are logged in to claude.ai in Chrome, Firefox, or Safari.",
             )

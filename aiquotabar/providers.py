@@ -540,11 +540,11 @@ def _warn_keychain_once():
     _keychain_warned = True
     subprocess.run(
         ["osascript", "-e",
-         'display dialog "Claude Usage Bar needs one-time access to your '
+         'display dialog "AI Quota Bar needs one-time access to your '
          'browser cookies to read your Claude usage.\\n\\n'
          'macOS will show a security prompt — click \\"Always Allow\\" '
          'and it will never ask again." '
-         'with title "Claude Usage Bar — One-time Setup" '
+         'with title "AI Quota Bar — One-time Setup" '
          'buttons {"OK"} default button "OK" '
          'with icon note'],
         capture_output=True, timeout=60,

@@ -414,7 +414,7 @@ def _fetch_history_data(conn: sqlite3.Connection) -> dict | None:
 def cli_history():
     """Print a 7-day usage history chart to the terminal."""
     if not os.path.exists(HISTORY_DB):
-        print("No history data yet. Run AIQuotaBar for a while first.")
+        print("No history data yet. Run AI Quota Bar for a while first.")
         return
 
     conn = sqlite3.connect(HISTORY_DB)
@@ -424,7 +424,7 @@ def cli_history():
     ).fetchall()]
 
     if not keys:
-        print("No history data yet. Run AIQuotaBar for a while first.")
+        print("No history data yet. Run AI Quota Bar for a while first.")
         conn.close()
         return
 
@@ -439,7 +439,7 @@ def cli_history():
     _dim = "\033[2m"
     _bold = "\033[1m"
 
-    print(f"\n{_bold}  AIQuotaBar -- 7-Day Usage History{_reset}\n")
+    print(f"\n{_bold}  AI Quota Bar -- 7-Day Usage History{_reset}\n")
 
     for key in keys:
         stats = _get_weekly_stats(conn, key)

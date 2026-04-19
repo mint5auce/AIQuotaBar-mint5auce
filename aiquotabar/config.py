@@ -9,7 +9,7 @@ import os
 # ── logging ──────────────────────────────────────────────────────────────────
 
 log = logging.getLogger("aiquotabar")
-LOG_FILE = os.path.expanduser("~/.claude_bar.log")
+LOG_FILE = os.path.expanduser("~/.aiquotabar.log")
 LOG_PURGE_MARKER = "log_cleanup_v1_done"
 
 
@@ -34,7 +34,7 @@ _configure_logging()
 
 # ── paths & thresholds ───────────────────────────────────────────────────────
 
-CONFIG_FILE = os.path.expanduser("~/.claude_bar_config.json")
+CONFIG_FILE = os.path.expanduser("~/.aiquotabar_config.json")
 
 REFRESH_INTERVALS = {
     "1 min":  60,
@@ -62,12 +62,12 @@ NOTIF_DEFAULTS = {
 
 # ── usage history + burn rate ────────────────────────────────────────────────
 
-HISTORY_FILE = os.path.expanduser("~/.claude_bar_history.json")
+HISTORY_FILE = os.path.expanduser("~/.aiquotabar_history.json")
 HISTORY_MAX_AGE = 24 * 3600  # prune entries older than 24 h
 PACING_ALERT_MINUTES = 30    # alert when ETA drops below this
 
 # ── SQLite long-term history ─────────────────────────────────────────────────
-HISTORY_DB = os.path.join(os.path.expanduser("~/Library/Application Support/AIQuotaBar"), "history.db")
+HISTORY_DB = os.path.join(os.path.expanduser("~/Library/Application Support/aiquotabar"), "history.db")
 SAMPLES_MAX_DAYS = 7
 DAILY_MAX_DAYS = 90
 LIMIT_HIT_PCT = 95

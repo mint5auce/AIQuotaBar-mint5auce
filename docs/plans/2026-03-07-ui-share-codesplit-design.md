@@ -5,7 +5,7 @@
 
 ## Overview
 
-Three changes to AIQuotaBar:
+Three changes to AI Quota Bar:
 1. Replace the NSMenu dropdown with a custom floating panel (NSPanel)
 2. Add share functionality (copy image + post to X)
 3. Split the 2900-line single file into 5 modules
@@ -20,7 +20,7 @@ Replace the `rumps` NSMenu with a borderless `NSPanel` anchored below the menu b
 
 ```
 +--------------------------------------+
-|  AIQuotaBar                 [share][gear]  |
+|  AI Quota Bar               [share][gear]  |
 +--------------------------------------+
 |                                      |
 |  * Claude              resets 3h 41m |
@@ -69,7 +69,7 @@ Replace the `rumps` NSMenu with a borderless `NSPanel` anchored below the menu b
 ### Copy Image
 
 - Render panel content area as PNG via `NSBitmapImageRep` from the panel's backing layer.
-- Add subtle footer watermark: "AIQuotaBar - github.com/yagcioglutoprak/AIQuotaBar"
+- Add subtle footer watermark: "AI Quota Bar - github.com/yagcioglutoprak/AIQuotaBar"
 - Copy to clipboard via `NSPasteboard`.
 - Share button shows brief "Copied" confirmation (1.5s).
 
@@ -78,7 +78,7 @@ Replace the `rumps` NSMenu with a borderless `NSPanel` anchored below the menu b
 - Open default browser with pre-filled tweet URL:
   `https://twitter.com/intent/tweet?text=...&url=https://github.com/yagcioglutoprak/AIQuotaBar`
 - Text generated dynamically from current usage stats.
-- Format: "Claude 42% / ChatGPT 0% / Copilot 0/300 -- tracking my AI usage with AIQuotaBar"
+- Format: "Claude 42% / ChatGPT 0% / Copilot 0/300 -- tracking my AI usage with AI Quota Bar"
 
 ### UX
 
@@ -90,13 +90,13 @@ Replace the `rumps` NSMenu with a borderless `NSPanel` anchored below the menu b
 ### Structure
 
 ```
-claude_bar.py              # Shim: from aiquotabar.__main__ import main; main()
+aiquotabar.py              # Shim: from aiquotabar.__main__ import main; main()
 aiquotabar/
   __main__.py              # Entry point (~10 lines)
   config.py                # Constants, load/save config, notification prefs
   providers.py             # Data models, all fetch functions, cookie detection, parsing
   history.py               # Usage history, burn rate, SQLite, sparklines
-  ui.py                    # ClaudeBar(rumps.App), floating panel, share, settings, windows
+  ui.py                    # AIQuotaBarApp(rumps.App), floating panel, share, settings, windows
   update.py                # Auto-update logic
 ```
 
@@ -110,7 +110,7 @@ config  <-  providers  <-  history  <-  ui  <-  __main__
 
 ### Migration
 
-- `claude_bar.py` becomes a thin shim so `python3 claude_bar.py` still works.
-- install.sh and LaunchAgent plist unchanged.
+- `aiquotabar.py` remains the entry point for local runs and packaging.
+- install.sh and the LaunchAgent plist use the renamed `aiquotabar` entrypoint and identifiers.
 - No new dependencies.
 - Assets stay in `assets/` at repo root (referenced by `ui.py` via path relative to package).

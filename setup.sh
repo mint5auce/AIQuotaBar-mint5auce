@@ -1,5 +1,5 @@
 #!/bin/bash
-# Legacy manual setup for Claude Usage Bar
+# Legacy manual setup for AI Quota Bar
 # Recommended: use install.sh instead
 
 set -e
@@ -18,6 +18,6 @@ fi
 
 echo ""
 echo "Done. To run:"
-echo "  .venv/bin/python3 claude_bar.py"
+echo "  .venv/bin/python3 aiquotabar.py"
 echo ""
 echo "To run at login, add it to System Settings → General → Login Items."

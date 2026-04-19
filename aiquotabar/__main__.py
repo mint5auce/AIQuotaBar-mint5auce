@@ -1,4 +1,4 @@
-"""AIQuotaBar entry point."""
+"""AI Quota Bar entry point."""
 
 import sys
 
@@ -8,8 +8,8 @@ def main():
         from aiquotabar.history import cli_history
         cli_history()
     else:
-        from aiquotabar.ui import ClaudeBar
-        ClaudeBar().run()
+        from aiquotabar.ui import AIQuotaBarApp
+        AIQuotaBarApp().run()
 
 
 if __name__ == "__main__":

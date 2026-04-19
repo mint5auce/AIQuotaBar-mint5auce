@@ -1,4 +1,4 @@
-# AIQuotaBar Security Review
+# AI Quota Bar Security Review
 
 Reviewed on 2026-04-17.
 
@@ -17,7 +17,7 @@ Together, these issues mean the app does more than "read cookies for usage check
 ## Scope Reviewed
 
 - Python app under `aiquotabar/`
-- Entry point `claude_bar.py`
+- Entry point `aiquotabar.py`
 - Installers: `install.sh`, `setup.sh`, `Formula/aiquotabar.rb`
 - Dependency manifest `requirements.txt`
 
@@ -25,13 +25,13 @@ Together, these issues mean the app does more than "read cookies for usage check
 
 ### F-01: Auto-detected session cookies are written into the rotating log file
 
-Impact: any local process or user with read access to `~/.claude_bar.log` can recover live session material and hijack Claude, ChatGPT, GitHub, or Cursor sessions.
+Impact: any local process or user with read access to `~/.aiquotabar.log` can recover live session material and hijack Claude, ChatGPT, GitHub, or Cursor sessions.
 
 Evidence:
 
 - `aiquotabar/providers.py:567-574` runs the cookie-detection subprocess and logs `r.stdout[:200]`.
 - `aiquotabar/providers.py:560` prints the detected cookie string as JSON to stdout.
-- `aiquotabar/config.py:10-15` configures a rotating file logger at `~/.claude_bar.log`.
+- `aiquotabar/config.py:10-15` configures a rotating file logger at `~/.aiquotabar.log`.
 - `README.md:182-185` tells users to inspect that log file for troubleshooting.
 
 Why this matters:
@@ -54,7 +54,7 @@ Impact: the app turns browser-protected sessions into long-lived plaintext secre
 
 Evidence:
 
-- `aiquotabar/config.py:20` stores configuration in `~/.claude_bar_config.json`.
+- `aiquotabar/config.py:20` stores configuration in `~/.aiquotabar_config.json`.
 - `aiquotabar/config.py:91-95` writes JSON directly with no encryption and no explicit permission hardening.
 - `aiquotabar/ui.py:2475-2481`, `2563-2567`, `2867-2877`, `3176-3210` persist auto-detected cookies.
 - `aiquotabar/ui.py:2967-2971` persists API keys the same way.
