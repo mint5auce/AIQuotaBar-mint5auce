@@ -10,7 +10,7 @@ Output: dist/AIQuotaBar.app
 
 from setuptools import setup
 
-APP = ["aiquotabar/__main__.py"]
+APP = ["app.py"]
 
 DATA_FILES = [
     ("assets", [

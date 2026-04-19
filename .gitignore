@@ -15,6 +15,8 @@ env/
 
 # User data (contains session cookies — never commit!)
 .aiquotabar_config.json
+.tmp-home/
+history.db
 
 # Logs
 *.log
