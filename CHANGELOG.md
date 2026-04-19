@@ -4,9 +4,13 @@ This changelog tracks notable user-facing changes to AI Quota Bar. It is curated
 
 For notable user-visible changes, update the `Unreleased` section in the same PR or commit. Purely internal refactors, tests, or docs-only cleanup can be skipped unless they change behavior users see.
 
-Release dates below come from Git tag metadata.
+Release dates below come from Git tag metadata when available.
 
 ## Unreleased
+
+No unreleased changes yet.
+
+## v1.7.0 - 2026-04-20
 
 ### Added
 
@@ -19,10 +23,11 @@ Release dates below come from Git tag metadata.
 - Repositioned the fork as a local-first, multi-provider quota monitor instead of a Claude-only utility.
 - Switched distribution to source builds and the bundled app installer rather than Homebrew or background self-update flows.
 - Simplified sharing and settings actions by removing low-value menu items such as Share on X and the direct Claude settings link.
+- Cut `v1.7.0` as a fully tested, working, release-ready baseline for this fork.
 
 ### Fixed
 
-- Improved provider diagnostics and setup copy so refresh/auth failures tell users what action to take next.
+- Improved provider diagnostics and setup copy so refresh and auth failures tell users what action to take next.
 - Tightened floating-panel and cookie-detection behavior for more reliable source runs and packaged app launches.
 
 ### Security
