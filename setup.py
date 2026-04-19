@@ -9,6 +9,7 @@ Output: dist/AIQuotaBar.app
 """
 
 from setuptools import setup
+from aiquotabar.version import get_display_version
 
 APP = ["app.py"]
 
@@ -30,6 +31,7 @@ OPTIONS = {
         "CFBundleIdentifier": "com.aiquotabar.app",
         "CFBundleShortVersionString": "1.0.0",
         "CFBundleVersion": "1.0.0",
+        "AIQuotaBarBuildVersion": get_display_version(),
         "LSUIElement": True,
         "LSMinimumSystemVersion": "13.0",
         "NSHumanReadableCopyright": "MIT",

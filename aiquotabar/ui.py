@@ -41,6 +41,7 @@ from aiquotabar.history import (
     _get_week_limit_hits, _get_today_stats,
     _fetch_history_data, _nscolor,
 )
+from aiquotabar.version import get_display_version
 # -- Brand icon helpers --------------------------------------------------------
 
 def _resolve_icon_dir() -> str:
@@ -162,6 +163,14 @@ def _diagnostic_sections(
 
 def _has_successful_provider_data(provider_data: list[ProviderData]) -> bool:
     return any(not pd.error for pd in provider_data)
+
+
+def _footer_metadata_lines(last_updated: datetime | None) -> tuple[str, str]:
+    if last_updated:
+        updated_line = f"Updated {last_updated.strftime('%H:%M')}"
+    else:
+        updated_line = "Updated --:--"
+    return updated_line, f"Version {get_display_version()}"
 
 
 def _available_bar_segments(
@@ -1745,7 +1754,7 @@ class _UsagePanel:
         y += 1 + 8
 
         # ── Footer ──────────────────────────────────────────────────────
-        footer_h = 20
+        footer_h = 34
         elements.append(('footer', y, footer_h))
         y += footer_h + PAD
 
@@ -2002,25 +2011,39 @@ class _UsagePanel:
     def _render_footer(self, parent, x, y, w, h,
                        NSTextField, NSFont, NSColor, NSButton,
                        NSMakeRect, NSTextAlignmentLeft, NSTextAlignmentRight):
-        """Render: 'Updated HH:MM' left + 'Refresh' button right."""
-        updated = self._app._last_updated
-        if updated:
-            ts = updated.strftime("%H:%M")
-        else:
-            ts = "--:--"
-        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, w - 80, h))
-        lbl.setStringValue_(f"Updated {ts}")
-        lbl.setBezeled_(False)
-        lbl.setDrawsBackground_(False)
-        lbl.setEditable_(False)
-        lbl.setSelectable_(False)
-        lbl.setAlignment_(NSTextAlignmentLeft)
-        lbl.setFont_(NSFont.systemFontOfSize_(10))
-        lbl.setTextColor_(NSColor.tertiaryLabelColor())
-        parent.addSubview_(lbl)
+        """Render updated/version metadata left + refresh button right."""
+        from AppKit import NSLineBreakByTruncatingMiddle
+
+        updated_line, version_line = _footer_metadata_lines(self._app._last_updated)
+        meta_w = w - 80
+
+        updated_lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y + 16, meta_w, 12))
+        updated_lbl.setStringValue_(updated_line)
+        updated_lbl.setBezeled_(False)
+        updated_lbl.setDrawsBackground_(False)
+        updated_lbl.setEditable_(False)
+        updated_lbl.setSelectable_(False)
+        updated_lbl.setAlignment_(NSTextAlignmentLeft)
+        updated_lbl.setFont_(NSFont.systemFontOfSize_(10))
+        updated_lbl.setTextColor_(NSColor.tertiaryLabelColor())
+        parent.addSubview_(updated_lbl)
+
+        version_lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y + 2, meta_w, 12))
+        version_lbl.setStringValue_(version_line)
+        version_lbl.setBezeled_(False)
+        version_lbl.setDrawsBackground_(False)
+        version_lbl.setEditable_(False)
+        version_lbl.setSelectable_(False)
+        version_lbl.setAlignment_(NSTextAlignmentLeft)
+        version_lbl.setFont_(NSFont.systemFontOfSize_(10))
+        version_lbl.setTextColor_(NSColor.secondaryLabelColor())
+        version_lbl.setLineBreakMode_(NSLineBreakByTruncatingMiddle)
+        parent.addSubview_(version_lbl)
 
         # Refresh button
-        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + w - 70, y, 70, h))
+        btn_h = 18
+        btn_y = y + max(0, int((h - btn_h) / 2))
+        btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + w - 70, btn_y, 70, btn_h))
         btn.setTitle_("\u21bb Refresh")
         btn.setBordered_(False)
         btn.setFont_(NSFont.systemFontOfSize_(10))
@@ -2343,10 +2366,10 @@ class AIQuotaBarApp(rumps.App):
             log.exception("Usage History menu item failed")
 
         # -- Footer -----------------------------------------------------------
-        if self._last_updated:
-            t = self._last_updated.strftime("%H:%M")
-            items.append(_mi(f"  Updated {t}"))
-            items.append(None)
+        updated_line, version_line = _footer_metadata_lines(self._last_updated)
+        items.append(_mi(f"  {updated_line}"))
+        items.append(_mi(f"  {version_line}"))
+        items.append(None)
 
         # -- Actions ----------------------------------------------------------
         items.append(rumps.MenuItem("Refresh Now", callback=self._do_refresh))

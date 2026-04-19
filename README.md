@@ -28,6 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/mint5auce/AIQuotaBar-mint5auce/main
 The installer builds a real `AIQuotaBar.app` bundle (via py2app), copies it to `/Applications`, ad-hoc codesigns it, and launches it. The app auto-detects your Claude, ChatGPT, Cursor, and Copilot sessions from Chrome, Arc, Brave, Edge, Firefox, or Safari — no copy-pasting cookies.
 
 Updates are manual: rerun the installer or pull the repo and rebuild yourself. The app does not self-update in the background.
+The menu and floating panel show a Git-derived build ID in the footer; installed app bundles update that build ID when you rebuild or rerun the installer.
 
 ---
 
