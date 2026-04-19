@@ -2430,7 +2430,7 @@ class AIQuotaBarApp(rumps.App):
                 # Fallback to notification if GIF missing
                 rumps.notification(
                     title="Welcome to AI Quota Bar",
-                    subtitle="Monitoring Claude + ChatGPT usage",
+                    subtitle="Monitoring AI provider usage",
                     message="Click the diamond in your menu bar to get started.",
                     sound=True,
                 )
