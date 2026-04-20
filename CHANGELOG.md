@@ -3,6 +3,7 @@
 This changelog tracks notable user-facing changes to AI Quota Bar. It is curated manually rather than generated from raw commits.
 
 For notable user-visible changes, update the `Unreleased` section in the same PR or commit. Purely internal refactors, tests, or docs-only cleanup can be skipped unless they change behavior users see.
+Release sync checklist: bump `setup.py`, keep the top changelog release heading aligned, create and push the matching Git tag, verify `git describe --always --dirty --tags`, then run the required validation.
 
 Release dates below come from Git tag metadata when available.
 

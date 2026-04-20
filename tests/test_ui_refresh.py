@@ -154,9 +154,9 @@ def test_diagnostic_sections_skip_missing_unconfigured_providers_when_data_exist
 
 
 def test_footer_metadata_lines_include_updated_and_version(monkeypatch):
-    monkeypatch.setattr(ui, "get_display_version", lambda: "v1.6.1-29-gbb15f3e-dirty")
+    monkeypatch.setattr(ui, "get_display_version", lambda: "v1.7.0-2-gbb15f3e-dirty")
 
     updated_line, version_line = ui._footer_metadata_lines(datetime(2026, 4, 20, 14, 32))
 
     assert updated_line == "Updated 14:32"
-    assert version_line == "Version v1.6.1-29-gbb15f3e-dirty"
+    assert version_line == "Version v1.7.0-2-gbb15f3e-dirty"
