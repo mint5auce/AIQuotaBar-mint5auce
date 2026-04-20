@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 
 import aiquotabar.ui as ui
@@ -160,3 +161,29 @@ def test_footer_metadata_lines_include_updated_and_version(monkeypatch):
 
     assert updated_line == "Updated 14:32"
     assert version_line == "Version v1.7.0-2-gbb15f3e-dirty"
+
+
+def test_appearance_icon_mode_maps_dark_and_light_matches():
+    assert ui._appearance_icon_mode("NSAppearanceNameDarkAqua") == "dark"
+    assert ui._appearance_icon_mode("NSAppearanceNameVibrantDark") == "dark"
+    assert ui._appearance_icon_mode("NSAppearanceNameAqua") == "light"
+    assert ui._appearance_icon_mode("NSAppearanceNameVibrantLight") == "light"
+    assert ui._appearance_icon_mode(None) == "light"
+
+
+def test_flush_ui_reapplies_cached_data_when_icon_mode_changes():
+    fake = type("FakeApp", (), {})()
+    fake._ui_lock = threading.Lock()
+    fake._ui_pending_title = None
+    fake._ui_pending_data = None
+    fake._icon_mode = "light"
+    fake._last_data = object()
+    fake._resolve_current_icon_mode = lambda: "dark"
+
+    calls = []
+    fake._apply = lambda data: calls.append(data)
+
+    ui.AIQuotaBarApp._flush_ui(fake, None)
+
+    assert fake._icon_mode == "dark"
+    assert calls == [fake._last_data]

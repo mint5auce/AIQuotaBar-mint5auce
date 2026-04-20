@@ -55,6 +55,15 @@ _ICON_DIR   = _resolve_icon_dir()
 _ICON_SIZE  = 14   # points -- matches menu bar font height
 _icon_cache: dict = {}
 _UI_APPLY_SENTINEL = object()
+_DARK_APPEARANCE_NAMES = (
+    "NSAppearanceNameDarkAqua",
+    "NSAppearanceNameVibrantDark",
+)
+_LIGHT_APPEARANCE_NAMES = (
+    "NSAppearanceNameAqua",
+    "NSAppearanceNameVibrantLight",
+)
+_APPEARANCE_NAMES = _DARK_APPEARANCE_NAMES + _LIGHT_APPEARANCE_NAMES
 
 
 @dataclass
@@ -205,31 +214,75 @@ def _available_bar_segments(
     return available
 
 
-def _bar_icon(filename: str, tint_hex: str | None = None):
-    """Lazy-load and cache a menu bar icon (14x14 pt NSImage).
+def _appearance_icon_mode(matched_name: str | None) -> str:
+    if matched_name in _DARK_APPEARANCE_NAMES:
+        return "dark"
+    return "light"
 
-    tint_hex: e.g. '#74AA9C' -- applied to monochrome (black) icons so they
-              show in the brand color. Pass None for already-coloured icons.
-    """
-    key = (filename, tint_hex)
+
+def _resolve_appearance_match(appearance) -> str | None:
+    if appearance is None:
+        return None
+    try:
+        return appearance.bestMatchFromAppearancesWithNames_(_APPEARANCE_NAMES)
+    except Exception:
+        return None
+
+
+def _status_item_icon_mode(status_item) -> str:
+    if status_item is None:
+        return "light"
+    try:
+        button = status_item.button()
+        appearance = button.effectiveAppearance() if button else None
+    except Exception:
+        appearance = None
+    return _appearance_icon_mode(_resolve_appearance_match(appearance))
+
+
+def _icon_color(icon_mode: str):
+    from AppKit import NSColor
+
+    return NSColor.whiteColor() if icon_mode == "dark" else NSColor.blackColor()
+
+
+def _render_monochrome_icon(raw, size: int, icon_mode: str):
+    from AppKit import (
+        NSCompositingOperationCopy,
+        NSCompositingOperationSourceIn,
+        NSImage,
+        NSRectFillUsingOperation,
+    )
+    from Foundation import NSMakeRect
+
+    img = NSImage.alloc().initWithSize_((size, size))
+    rect = NSMakeRect(0, 0, size, size)
+    src_size = raw.size()
+    src_rect = NSMakeRect(0, 0, src_size.width, src_size.height)
+    img.lockFocus()
+    try:
+        raw.drawInRect_fromRect_operation_fraction_(rect, src_rect, NSCompositingOperationCopy, 1.0)
+        _icon_color(icon_mode).set()
+        NSRectFillUsingOperation(rect, NSCompositingOperationSourceIn)
+    finally:
+        img.unlockFocus()
+    img.setTemplate_(False)
+    img.setSize_((size, size))
+    return img
+
+
+def _bar_icon(filename: str, icon_mode: str):
+    """Lazy-load and cache a monochrome menu bar icon (14x14 pt NSImage)."""
+    key = (filename, _ICON_SIZE, icon_mode)
     if key in _icon_cache:
         return _icon_cache[key]
     img = None
     try:
-        from AppKit import NSImage, NSColor
+        from AppKit import NSImage
         path = os.path.join(_ICON_DIR, filename)
         raw = NSImage.alloc().initWithContentsOfFile_(path)
         if raw:
-            img = raw.copy()
-            img.setSize_((_ICON_SIZE, _ICON_SIZE))
-            if tint_hex:
-                r = int(tint_hex[1:3], 16) / 255
-                g = int(tint_hex[3:5], 16) / 255
-                b = int(tint_hex[5:7], 16) / 255
-                color = NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
-                img.setTemplate_(True)
-                if hasattr(img, "imageWithTintColor_"):
-                    img = img.imageWithTintColor_(color)
+            img = _render_monochrome_icon(raw, _ICON_SIZE, icon_mode)
     except Exception as e:
         log.debug("_bar_icon %s: %s", filename, e)
     _icon_cache[key] = img
@@ -989,24 +1042,19 @@ def _colored_mi(title: str, color_hex: str) -> rumps.MenuItem:
     return item
 
 
-def _menu_icon(filename: str, tint_hex: str | None = None, size: int = 16):
-    """Load an NSImage for use in a menu item, optionally tinted."""
+def _menu_icon(filename: str, icon_mode: str, size: int = 16):
+    """Load a monochrome NSImage for use in a menu item."""
+    key = (filename, size, icon_mode)
+    if key in _icon_cache:
+        return _icon_cache[key]
     try:
-        from AppKit import NSImage, NSColor
+        from AppKit import NSImage
         path = os.path.join(_ICON_DIR, filename)
         raw = NSImage.alloc().initWithContentsOfFile_(path)
         if not raw:
             return None
-        img = raw.copy()
-        img.setSize_((size, size))
-        if tint_hex:
-            r = int(tint_hex[1:3], 16) / 255
-            g = int(tint_hex[3:5], 16) / 255
-            b = int(tint_hex[5:7], 16) / 255
-            color = NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
-            img.setTemplate_(True)
-            if hasattr(img, "imageWithTintColor_"):
-                img = img.imageWithTintColor_(color)
+        img = _render_monochrome_icon(raw, size, icon_mode)
+        _icon_cache[key] = img
         return img
     except Exception as e:
         log.debug("_menu_icon %s: %s", filename, e)
@@ -1014,7 +1062,7 @@ def _menu_icon(filename: str, tint_hex: str | None = None, size: int = 16):
 
 
 def _section_header_mi(title: str, icon_filename: str | None,
-                        color_hex: str, icon_tint: str | None = None) -> rumps.MenuItem:
+                        color_hex: str, icon_mode: str) -> rumps.MenuItem:
     """Section header with brand icon and colored bold title."""
     item = rumps.MenuItem(title)
     item.set_callback(None)
@@ -1032,7 +1080,7 @@ def _section_header_mi(title: str, icon_filename: str | None,
         astr = NSAttributedString.alloc().initWithString_attributes_(title, attrs)
         item._menuitem.setAttributedTitle_(astr)
         if icon_filename:
-            img = _menu_icon(icon_filename, tint_hex=icon_tint)
+            img = _menu_icon(icon_filename, icon_mode)
             if img:
                 item._menuitem.setImage_(img)
     except Exception as e:
@@ -2092,6 +2140,7 @@ class AIQuotaBarApp(rumps.App):
         self._login_item_cached: bool | None = None
         self._last_secret_store_error = 0.0
         self._pending_secret_migration_failures = migration.failed
+        self._icon_mode = self._resolve_current_icon_mode()
         if not _is_login_item():
             _add_login_item()
 
@@ -2172,9 +2221,10 @@ class AIQuotaBarApp(rumps.App):
 
     def _rebuild_menu(self, data: UsageData | None):
         items: list = []
+        icon_mode = self._icon_mode
 
         # -- CLAUDE section ---------------------------------------------------
-        items.append(_section_header_mi("  Claude", "claude_icon.png", "#D97757"))
+        items.append(_section_header_mi("  Claude", "claude_icon.png", "#D97757", icon_mode))
 
         if data is None or not any([data.session, data.weekly_all, data.weekly_sonnet]):
             status_lines = _status_lines(self._refresh_status.get("Claude"))
@@ -2233,7 +2283,7 @@ class AIQuotaBarApp(rumps.App):
         )
         if chatgpt_pd:
             items.append(_section_header_mi("  ChatGPT", "chatgpt_icon_clean.png",
-                                            "#74AA9C", icon_tint="#74AA9C"))
+                                            "#74AA9C", icon_mode))
             rows = getattr(chatgpt_pd, "_rows", None)
             if rows:
                 for row in rows:
@@ -2266,7 +2316,7 @@ class AIQuotaBarApp(rumps.App):
             (pd for pd in self._provider_data if pd.name == "Copilot"), None
         )
         if copilot_pd:
-            items.append(_section_header_mi("  GitHub Copilot", "copilot.png", "#6E40C9", icon_tint="#9B6BFF"))
+            items.append(_section_header_mi("  GitHub Copilot", "copilot.png", "#6E40C9", icon_mode))
             for line in _provider_lines(copilot_pd):
                 if line:
                     items.append(_mi(line))
@@ -2291,7 +2341,7 @@ class AIQuotaBarApp(rumps.App):
             (pd for pd in self._provider_data if pd.name == "Cursor"), None
         )
         if cursor_pd:
-            items.append(_section_header_mi("  Cursor", "cursor.png", "#00A0D1", icon_tint="#00A0D1"))
+            items.append(_section_header_mi("  Cursor", "cursor.png", "#00A0D1", icon_mode))
             rows = getattr(cursor_pd, "_rows", None)
             if rows:
                 for row in rows:
@@ -2322,7 +2372,7 @@ class AIQuotaBarApp(rumps.App):
         # -- CLAUDE CODE section ----------------------------------------------
         if self._cc_stats:
             cc = self._cc_stats
-            items.append(_section_header_mi("  Claude Code", "claude_icon.png", "#D97757"))
+            items.append(_section_header_mi("  Claude Code", "claude_icon.png", "#D97757", icon_mode))
             if cc["today_messages"] > 0:
                 items.append(_mi(
                     f"  Today     {_fmt_count(cc['today_messages'])} msgs"
@@ -2488,10 +2538,17 @@ class AIQuotaBarApp(rumps.App):
             data = self._ui_pending_data
             self._ui_pending_title = None
             self._ui_pending_data = None
+        icon_mode = self._resolve_current_icon_mode()
+        icon_mode_changed = icon_mode != self._icon_mode
+        if icon_mode_changed:
+            self._icon_mode = icon_mode
+            _icon_cache.clear()
         if data is _UI_APPLY_SENTINEL:
             self._apply(None)
         elif data is not None:
             self._apply(data)
+        elif icon_mode_changed:
+            self._apply(self._last_data)
         elif title is not None:
             self.title = title
 
@@ -2998,11 +3055,18 @@ class AIQuotaBarApp(rumps.App):
 
     # Bar icon/color config per provider name
     _BAR_PROVIDERS = {
-        "Claude":  {"icon": "claude_icon.png",        "tint": None,      "color": "#D97757", "sym": "\u25cf"},
-        "ChatGPT": {"icon": "chatgpt_icon_clean.png", "tint": "#74AA9C", "color": "#74AA9C", "sym": "\u25c7"},
-        "Cursor":  {"icon": "cursor.png",             "tint": "#6699FF", "color": "#6699FF", "sym": "\u25c8"},
-        "Copilot": {"icon": "copilot.png",            "tint": "#8CBFF3", "color": "#8CBFF3", "sym": "\u25c6"},
+        "Claude":  {"icon": "claude_icon.png",        "color": "#D97757", "sym": "\u25cf"},
+        "ChatGPT": {"icon": "chatgpt_icon_clean.png", "color": "#74AA9C", "sym": "\u25c7"},
+        "Cursor":  {"icon": "cursor.png",             "color": "#6699FF", "sym": "\u25c8"},
+        "Copilot": {"icon": "copilot.png",            "color": "#8CBFF3", "sym": "\u25c6"},
     }
+
+    def _resolve_current_icon_mode(self) -> str:
+        try:
+            status_item = self._nsapp.nsstatusitem
+        except Exception:
+            status_item = None
+        return _status_item_icon_mode(status_item)
 
     def _set_bar_title(self, provider_segments: list[tuple[str, int, str]],
                        cc_msgs: int | None = None):
@@ -3037,11 +3101,10 @@ class AIQuotaBarApp(rumps.App):
                 if i > 0:
                     s.appendAttributedString_(
                         NSAttributedString.alloc().initWithString_attributes_("   ", base)
-                    )
+                )
 
                 icon_file = cfg.get("icon")
-                tint = cfg.get("tint")
-                img = _bar_icon(icon_file, tint_hex=tint) if icon_file else None
+                img = _bar_icon(icon_file, self._icon_mode) if icon_file else None
                 if img:
                     s.appendAttributedString_(_icon_astr(img, base))
                 else:
@@ -3289,10 +3352,10 @@ class AIQuotaBarApp(rumps.App):
         return _cb
 
     _TOGGLE_ICONS = {
-        "Claude":  ("claude_icon.png",        None),
-        "ChatGPT": ("chatgpt_icon_clean.png", "#74AA9C"),
-        "Cursor":  ("cursor.png",             "#6699FF"),
-        "Copilot": ("copilot.png",            "#8CBFF3"),
+        "Claude": "claude_icon.png",
+        "ChatGPT": "chatgpt_icon_clean.png",
+        "Cursor": "cursor.png",
+        "Copilot": "copilot.png",
     }
 
     def _make_sticky_toggle(self, display_name: str, is_on: bool, name: str):
@@ -3321,9 +3384,9 @@ class AIQuotaBarApp(rumps.App):
             view.addSubview_(check)
 
             # Real icon
-            icon_file, icon_tint = self._TOGGLE_ICONS.get(name, (None, None))
+            icon_file = self._TOGGLE_ICONS.get(name)
             if icon_file:
-                img = _menu_icon(icon_file, tint_hex=icon_tint, size=icon_sz)
+                img = _menu_icon(icon_file, self._icon_mode, size=icon_sz)
                 if img:
                     iv = NSImageView.alloc().initWithFrame_(
                         NSMakeRect(check_w, (view_h - icon_sz) / 2, icon_sz, icon_sz)
@@ -3356,9 +3419,9 @@ class AIQuotaBarApp(rumps.App):
             # Fallback: standard menu item (will close on click)
             item = rumps.MenuItem(display_name, callback=lambda _: self._do_bar_toggle(name))
             item._menuitem.setState_(1 if is_on else 0)
-            icon_file, icon_tint = self._TOGGLE_ICONS.get(name, (None, None))
+            icon_file = self._TOGGLE_ICONS.get(name)
             if icon_file:
-                img = _menu_icon(icon_file, tint_hex=icon_tint, size=16)
+                img = _menu_icon(icon_file, self._icon_mode, size=16)
                 if img:
                     item._menuitem.setImage_(img)
 
