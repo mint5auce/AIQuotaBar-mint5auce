@@ -2704,6 +2704,45 @@ class AIQuotaBarApp(rumps.App):
             configured=configured,
         )
 
+    def _classify_provider_error(
+        self, name: str, error: str, lower: str,
+    ) -> tuple[str, str]:
+        """Map a provider error string to (state, user-facing summary).
+
+        ChatGPT emits structured prefixes (``session: <code>`` / ``wham: <code>``)
+        from ``fetch_chatgpt`` so we can distinguish a rejected session from an
+        OpenAI-side shape change. Other providers fall through to keyword match.
+        """
+        if name == "ChatGPT":
+            if lower.startswith("session:"):
+                if "no accesstoken" in lower:
+                    return (
+                        "fetch_failed",
+                        "ChatGPT auth endpoint changed — the app needs updating.",
+                    )
+                if "401" in lower or "403" in lower:
+                    return (
+                        "auth_failed",
+                        "ChatGPT session was rejected — re-login at chatgpt.com "
+                        "and refresh from the gear menu.",
+                    )
+            elif lower.startswith("wham:"):
+                if "401" in lower or "403" in lower:
+                    return (
+                        "auth_failed",
+                        "ChatGPT rejected the access token — try re-login; "
+                        "if persistent the app needs updating.",
+                    )
+
+        state = (
+            "auth_failed"
+            if any(token in lower for token in (
+                "not logged in", "unauthor", "forbidden", "401", "403", "session",
+            ))
+            else "fetch_failed"
+        )
+        return state, error[:80]
+
     def _fetch_claude_snapshot(
         self,
     ) -> tuple[UsageData | None, dict, ProviderRefreshStatus, bool, int | None]:
@@ -3288,17 +3327,11 @@ class AIQuotaBarApp(rumps.App):
                 )
                 continue
             lower = pd.error.lower()
-            state = (
-                "auth_failed"
-                if any(token in lower for token in (
-                    "not logged in", "unauthor", "forbidden", "401", "403", "session",
-                ))
-                else "fetch_failed"
-            )
+            state, message = self._classify_provider_error(name, pd.error, lower)
             statuses[name] = self._make_refresh_status(
                 name,
                 state,
-                pd.error[:80],
+                message,
                 configured=True,
             )
 

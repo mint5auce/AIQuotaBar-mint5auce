@@ -354,19 +354,47 @@ def _parse_wham_usage(data: dict) -> ProviderData:
     return pd
 
 
+def _chatgpt_http_error(step: str, exc: CurlHTTPError) -> str:
+    """Build a structured error string and log diagnostics for a failed step.
+
+    Returns strings like ``"session: 401"`` / ``"wham: 403"`` so the UI can
+    distinguish *which* step rejected us and react accordingly. The full
+    response body is emitted via ``log.warning`` for offline diagnosis.
+    """
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None)
+    body = (getattr(resp, "text", "") or "")[:500].replace("\n", " ")
+    log.warning("fetch_chatgpt %s step HTTP %s: %s", step, status, body)
+    if status:
+        return f"{step}: {status}"
+    return f"{step}: {str(exc)[:60]}"
+
+
 def fetch_chatgpt(cookie_str: str) -> ProviderData:
     """Fetch ChatGPT / Codex usage via /backend-api/wham/usage."""
     cookies = parse_cookie_string(cookie_str)
+
     try:
         token = _chatgpt_access_token(cookies)
-        if not token:
-            return ProviderData("ChatGPT", error="Not logged in")
-        h = {**_CHATGPT_HEADERS, "Authorization": f"Bearer {token}"}
-        data = _api_get("https://chatgpt.com/backend-api/wham/usage", h, cookies)
-        return _parse_wham_usage(data)
+    except CurlHTTPError as e:
+        return ProviderData("ChatGPT", error=_chatgpt_http_error("session", e))
     except Exception as e:
-        log.debug("fetch_chatgpt failed: %s", e)
-        return ProviderData("ChatGPT", error=str(e)[:80])
+        log.debug("fetch_chatgpt session step failed: %s", e)
+        return ProviderData("ChatGPT", error=f"session: {str(e)[:60]}")
+
+    if not token:
+        return ProviderData("ChatGPT", error="session: no accessToken")
+
+    h = {**_CHATGPT_HEADERS, "Authorization": f"Bearer {token}"}
+    try:
+        data = _api_get("https://chatgpt.com/backend-api/wham/usage", h, cookies)
+    except CurlHTTPError as e:
+        return ProviderData("ChatGPT", error=_chatgpt_http_error("wham", e))
+    except Exception as e:
+        log.debug("fetch_chatgpt wham step failed: %s", e)
+        return ProviderData("ChatGPT", error=f"wham: {str(e)[:60]}")
+
+    return _parse_wham_usage(data)
 
 
 def fetch_openai(api_key: str) -> ProviderData:
