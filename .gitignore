@@ -36,5 +36,8 @@ Icon?
 *.swp
 *.swo
 
+# Intermediate icon build artifacts (keep .icns, skip the iconset source dir)
+assets/*.iconset/
+
 # Distribution archives
 *.zip

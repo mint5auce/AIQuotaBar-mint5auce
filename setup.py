@@ -13,6 +13,8 @@ from aiquotabar.version import get_display_version
 
 APP = ["app.py"]
 
+ICON_FILE = "assets/AIQuotaBar.icns"
+
 DATA_FILES = [
     ("assets", [
         "assets/chatgpt_icon.png",
@@ -25,7 +27,9 @@ DATA_FILES = [
 
 OPTIONS = {
     "argv_emulation": False,
+    "iconfile": ICON_FILE,
     "plist": {
+        "CFBundleIconFile": "AIQuotaBar.icns",
         "CFBundleName": "AIQuotaBar",
         "CFBundleDisplayName": "AIQuotaBar",
         "CFBundleIdentifier": "com.aiquotabar.app",
