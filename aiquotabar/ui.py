@@ -2449,6 +2449,14 @@ class AIQuotaBarApp(rumps.App):
             callback=self._bar_reset_auto,
         )
         bar_menu.add(auto_item)
+        bar_menu.add(None)
+        minimal_item = rumps.MenuItem(
+            "Minimal Mode", callback=self._toggle_bar_minimal
+        )
+        minimal_item._menuitem.setState_(
+            1 if self.config.get("bar_minimal") else 0
+        )
+        bar_menu.add(minimal_item)
         items.append(bar_menu)
 
         # Refresh interval submenu
@@ -3077,6 +3085,7 @@ class AIQuotaBarApp(rumps.App):
 
         Falls back to colored text symbols if AppKit / icons unavailable.
         """
+        minimal = bool(self.config.get("bar_minimal"))
         try:
             from AppKit import (NSColor, NSFont,
                                 NSForegroundColorAttributeName, NSFontAttributeName)
@@ -3090,6 +3099,24 @@ class AIQuotaBarApp(rumps.App):
 
             font = NSFont.menuBarFontOfSize_(0)
             base = {NSFontAttributeName: font} if font else {}
+
+            if minimal:
+                s = NSMutableAttributedString.alloc().initWithString_("",)
+                crit_color = _rgb("#D9534F")
+                for i, (_name, pct, _suffix) in enumerate(provider_segments):
+                    if i > 0:
+                        s.appendAttributedString_(
+                            NSAttributedString.alloc().initWithString_attributes_(" / ", base)
+                        )
+                    num_str = str(pct)
+                    seg = NSMutableAttributedString.alloc().initWithString_attributes_(num_str, base)
+                    if pct >= CRIT_THRESHOLD:
+                        seg.addAttribute_value_range_(
+                            NSForegroundColorAttributeName, crit_color, (0, len(num_str))
+                        )
+                    s.appendAttributedString_(seg)
+                self._nsapp.nsstatusitem.setAttributedTitle_(s)
+                return
 
             s = NSMutableAttributedString.alloc().initWithString_("",)
 
@@ -3131,6 +3158,9 @@ class AIQuotaBarApp(rumps.App):
         except Exception as e:
             log.debug("_set_bar_title failed: %s", e)
         # Plain-text fallback
+        if minimal:
+            self.title = " / ".join(str(pct) for _, pct, _ in provider_segments)
+            return
         parts = []
         for name, pct, suffix in provider_segments:
             cfg = self._BAR_PROVIDERS.get(name, {})
@@ -3471,6 +3501,14 @@ class AIQuotaBarApp(rumps.App):
     def _bar_reset_auto(self, _sender):
         """Reset bar display to auto-detect (top 2 active providers)."""
         self.config.pop("bar_providers", None)
+        save_config(self.config)
+        self._rebuild_menu(self._last_data)
+        if self._last_data:
+            self._apply(self._last_data)
+
+    def _toggle_bar_minimal(self, _sender):
+        """Toggle minimal bar rendering (numerals separated by ' / ')."""
+        self.config["bar_minimal"] = not self.config.get("bar_minimal", False)
         save_config(self.config)
         self._rebuild_menu(self._last_data)
         if self._last_data:
